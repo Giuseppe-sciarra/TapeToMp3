@@ -6,6 +6,16 @@ on:
     tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versione da rilasciare (es. 1.0.0). Vuoto = solo build, niente release'
+        required: false
+        default: ''
+      prerelease:
+        description: 'Segna come pre-release'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -15,6 +25,27 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Determina versione
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "${{ github.event.inputs.version }}".Trim().TrimStart('v','V')
+          $release = "false"
+          if ($v -ne "") {
+            if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "Versione non valida: '$v' (usa il formato 1.2.3)" }
+            $release = "true"
+          }
+          elseif ("${{ github.ref }}" -like "refs/tags/v*") {
+            $v = "${{ github.ref_name }}".TrimStart('v','V')
+            $release = "true"
+          }
+          else {
+            $v = "0.0.${{ github.run_number }}"
+          }
+          "version=$v"     >> $env:GITHUB_OUTPUT
+          "release=$release" >> $env:GITHUB_OUTPUT
+          Write-Host "Versione: $v  -  Release: $release"
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -28,6 +59,7 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:EnableCompressionInSingleFile=true
           -p:DebugType=none
+          -p:Version=${{ steps.ver.outputs.version }}
           -o publish
 
       - name: Scarica ffmpeg (gyan.dev essentials)
@@ -41,15 +73,20 @@ jobs:
 
       - name: Zip
         shell: pwsh
-        run: Compress-Archive -Path publish\* -DestinationPath Tape2MP3-win-x64.zip
+        run: Compress-Archive -Path publish\* -DestinationPath Tape2MP3-${{ steps.ver.outputs.version }}-win-x64.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Tape2MP3-win-x64
+          name: Tape2MP3-${{ steps.ver.outputs.version }}-win-x64
           path: publish/
 
-      - name: Release (solo sui tag v*)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Crea release
+        if: steps.ver.outputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          files: Tape2MP3-win-x64.zip
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: Tape2MP3 v${{ steps.ver.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          generate_release_notes: true
+          files: Tape2MP3-${{ steps.ver.outputs.version }}-win-x64.zip
