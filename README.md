@@ -32,6 +32,14 @@ Riversaggio musicassette → MP3 / FLAC / WAV / M4A. Niente di più.
 
 ⚙ → *Analisi buchi*: **Margine sopra il fruscio** (default 6 dB: più alto = più sensibile), **Buco minimo** (0,7 s), **Pausa fra brani da** (1,5 s), cali improvvisi on/off. Poi **Rianalizza**.
 
+## Aspetto, versione e aggiornamenti
+
+- **Tema chiaro / scuro**: pulsante ◐ in alto a destra (Automatico → Chiaro → Scuro) oppure ⚙ → *Aspetto*. *Automatico* segue il tema di Windows e cambia da solo se lo cambi in Windows.
+- **Versione**: nel titolo della finestra e in basso a sinistra. Click sulla versione per le informazioni: numero di build, commit, data, ffmpeg incluso e cartelle di lavoro.
+- **Aggiornamenti**: all'avvio controlla l'ultima Release su GitHub. Se ce n'è una nuova, in basso compare "⬆ Disponibile la versione …": ci clicchi e ti apre la pagina di download. Funziona solo se il repo è pubblico; il repo si cambia in `settings.json` → `UpdateRepo`.
+- **Barra in basso**: formato di registrazione, peso del file e spazio libero su disco, con una stima delle ore di registrazione che ci stanno. Diventa gialla sotto i 2 GB, e sotto 1 GB il programma avvisa prima di registrare.
+- **Trascina e rilascia**: trascina un file audio sulla finestra per aprirlo.
+
 ## Destinazioni di rete
 
 ⚙ → *Destinazioni*: aggiungi percorsi tipo `Y:\Riversaggi` o `\\nas\audio\Cassette`. Utente e password servono solo se la share li chiede (la password è cifrata DPAPI sull'utente Windows). Il tasto *Prova* verifica che la cartella sia scrivibile.

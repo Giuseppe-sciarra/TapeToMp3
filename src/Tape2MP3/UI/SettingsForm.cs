@@ -9,7 +9,8 @@ public sealed class SettingsForm : Form
     private readonly List<Destination> _dests;
     private readonly ListBox _list;
     private readonly NumericUpDown _margin, _minGap, _minPause, _minTrack, _autoSec, _autoDb;
-    private readonly CheckBox _drops, _autoPause, _openFolder;
+    private readonly CheckBox _drops, _autoPause, _openFolder, _checkUpd;
+    private readonly ComboBox _theme;
 
     public SettingsForm(AppSettings s)
     {
@@ -23,7 +24,7 @@ public sealed class SettingsForm : Form
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = MinimizeBox = false;
-        ClientSize = new Size(660, 640);
+        ClientSize = new Size(660, 716);
         BackColor = Theme.Back;
         ForeColor = Theme.Text;
         Font = new Font("Segoe UI", 9.5f);
@@ -39,7 +40,7 @@ public sealed class SettingsForm : Form
             ("Aggiungi…", AddDest), ("Modifica…", EditDest), ("Rimuovi", RemoveDest), ("Su", () => MoveDest(-1)), ("Giù", () => MoveDest(1)), ("Prova", TestDest)
         })
         {
-            var b = Theme.MakeButton(txt, null, 120);
+            var b = Theme.MakeButton(txt, BtnKind.Neutral, 120);
             b.Height = 30; b.Font = new Font("Segoe UI", 9f);
             b.Location = new Point(bx, by); by += 34;
             b.Click += (o, e) => act();
@@ -80,10 +81,22 @@ public sealed class SettingsForm : Form
         gRec.Controls.AddRange(new Control[] { _autoPause, _autoSec, l1, _autoDb, l2, l3, _openFolder });
         Controls.Add(gRec);
 
-        var ok = Theme.MakeButton("Salva", Theme.Accent, 110);
+        // --- aspetto
+        var gLook = new GroupBox { Text = "Aspetto e aggiornamenti", ForeColor = Theme.Text, Bounds = new Rectangle(12, 586, 636, 64) };
+        gLook.Controls.Add(new Label { Text = "Tema:", AutoSize = true, Location = new Point(14, 29), ForeColor = Theme.Text });
+        _theme = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(70, 25), Width = 140 };
+        Theme.StyleInput(_theme);
+        _theme.Items.AddRange(Enum.GetNames(typeof(ThemeMode)));
+        _theme.SelectedItem = Enum.TryParse<ThemeMode>(s.Theme, out var tm) ? tm.ToString() : ThemeMode.Automatico.ToString();
+        _checkUpd = new CheckBox { Text = "Controlla se c'è una versione nuova all'avvio", Checked = s.CheckUpdates, AutoSize = true, Location = new Point(240, 28), ForeColor = Theme.Text };
+        gLook.Controls.Add(_theme);
+        gLook.Controls.Add(_checkUpd);
+        Controls.Add(gLook);
+
+        var ok = Theme.MakeButton("Salva", BtnKind.Primary, 110);
         ok.Location = new Point(ClientSize.Width - 240, ClientSize.Height - 50);
         ok.Click += (o, e) => { Commit(); DialogResult = DialogResult.OK; };
-        var cancel = Theme.MakeButton("Annulla", null, 110);
+        var cancel = Theme.MakeButton("Annulla", BtnKind.Neutral, 110);
         cancel.Location = new Point(ClientSize.Width - 122, ClientSize.Height - 50);
         cancel.Click += (o, e) => DialogResult = DialogResult.Cancel;
         Controls.Add(ok); Controls.Add(cancel);
@@ -91,6 +104,7 @@ public sealed class SettingsForm : Form
 
         RefreshList();
         ResumeLayout(false);
+        HandleCreated += (o, e) => Theme.SetDarkTitleBar(this);
     }
 
     private static NumericUpDown Num(decimal min, decimal max, decimal val, int dec, decimal inc)
@@ -176,6 +190,8 @@ public sealed class SettingsForm : Form
         _s.AutoPauseSec = (double)_autoSec.Value;
         _s.SilenceDb = (double)_autoDb.Value;
         _s.OpenFolderAfterExport = _openFolder.Checked;
+        _s.Theme = _theme.SelectedItem as string ?? "Automatico";
+        _s.CheckUpdates = _checkUpd.Checked;
         if (_s.LastDestination >= _dests.Count) _s.LastDestination = 0;
     }
 }
@@ -207,7 +223,7 @@ internal static class DestinationDialog
 
         L("Nome:", 16); var name = T(d.Name, 14);
         L("Percorso:", 50); var path = T(d.Path, 48);
-        var browse = Theme.MakeButton("Sfoglia…", null, 100); browse.Height = 27; browse.Font = new Font("Segoe UI", 9f);
+        var browse = Theme.MakeButton("Sfoglia…", BtnKind.Neutral, 100); browse.Height = 27; browse.Font = new Font("Segoe UI", 9f);
         browse.Location = new Point(448, 46);
         browse.Click += (o, e) =>
         {
@@ -228,12 +244,13 @@ internal static class DestinationDialog
             AutoSize = false, Size = new Size(400, 34), Location = new Point(150, 168), ForeColor = Theme.TextDim
         });
 
-        var ok = Theme.MakeButton("OK", Theme.Accent, 100); ok.Location = new Point(338, 206);
-        var ko = Theme.MakeButton("Annulla", null, 100); ko.Location = new Point(446, 206);
+        var ok = Theme.MakeButton("OK", BtnKind.Primary, 100); ok.Location = new Point(338, 206);
+        var ko = Theme.MakeButton("Annulla", BtnKind.Neutral, 100); ko.Location = new Point(446, 206);
         ok.DialogResult = DialogResult.OK; ko.DialogResult = DialogResult.Cancel;
         f.Controls.Add(ok); f.Controls.Add(ko);
         f.AcceptButton = ok; f.CancelButton = ko;
         f.ResumeLayout(false);
+        f.HandleCreated += (o, e) => Theme.SetDarkTitleBar(f);
 
         while (f.ShowDialog(owner) == DialogResult.OK)
         {

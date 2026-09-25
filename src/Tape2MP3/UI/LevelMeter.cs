@@ -15,6 +15,7 @@ public sealed class LevelMeter : Control
     {
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
         Height = 46;
+        Tag = "panel";
         BackColor = Theme.Panel;
     }
 
@@ -47,13 +48,14 @@ public sealed class LevelMeter : Control
     {
         var g = e.Graphics;
         g.Clear(BackColor);
-        int labelW = 18, clipW = 34;
-        int barX = labelW, barW = Width - labelW - clipW - 6;
+        int labelW = 18, clipW = 38;
+        int barX = labelW, barW = Width - labelW - clipW - 8;
         int barH = (Height - 16) / 2 - 2;
         if (barW < 20 || barH < 4) return;
 
         using var font = new Font("Segoe UI", 7.5f);
         using var txt = new SolidBrush(Theme.TextDim);
+        using var tick = new Pen(Theme.Border);
 
         DrawBar(g, barX, 2, barW, barH, _l, _holdL);
         DrawBar(g, barX, 4 + barH, barW, barH, _r, _holdR);
@@ -65,7 +67,7 @@ public sealed class LevelMeter : Control
         foreach (var db in new[] { -60, -48, -36, -24, -18, -12, -6, -3, 0 })
         {
             float x = barX + (db - MinDb) / -MinDb * barW;
-            g.DrawLine(Pens.Gray, x, sy, x, sy + 3);
+            g.DrawLine(tick, x, sy, x, sy + 3);
             var s = db.ToString();
             var sz = g.MeasureString(s, font);
             float tx = Math.Clamp(x - sz.Width / 2, barX, barX + barW - sz.Width);
@@ -75,16 +77,18 @@ public sealed class LevelMeter : Control
         // spia clip
         bool clip = DateTime.UtcNow < _clipUntil;
         var clipRect = new Rectangle(Width - clipW - 2, 2, clipW, barH * 2 + 2);
-        using (var b = new SolidBrush(clip ? Color.FromArgb(230, 40, 40) : Color.FromArgb(60, 60, 64)))
-            g.FillRectangle(b, clipRect);
+        using (var b = new SolidBrush(clip ? Theme.Rec : Theme.Panel2)) g.FillRectangle(b, clipRect);
+        using (var bp = new Pen(clip ? Theme.Rec : Theme.Border)) g.DrawRectangle(bp, clipRect);
         using var cf = new Font("Segoe UI", 7f, FontStyle.Bold);
         var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-        g.DrawString("CLIP", cf, clip ? Brushes.White : Brushes.Gray, clipRect, sf);
+        using var cb = new SolidBrush(clip ? Color.White : Theme.TextDim);
+        g.DrawString("CLIP", cf, cb, clipRect, sf);
     }
 
     private static void DrawBar(Graphics g, int x, int y, int w, int h, float db, float hold)
     {
-        using (var bg = new SolidBrush(Color.FromArgb(34, 34, 38))) g.FillRectangle(bg, x, y, w, h);
+        using (var bg = new SolidBrush(Theme.LaneBg)) g.FillRectangle(bg, x, y, w, h);
+        using (var bp = new Pen(Theme.Border)) g.DrawRectangle(bp, x, y, w - 1, h - 1);
         float frac = (db - MinDb) / -MinDb;
         int fw = (int)(w * frac);
         if (fw > 0)
@@ -96,10 +100,10 @@ public sealed class LevelMeter : Control
                 Positions = new[] { 0f, (-18 - MinDb) / -MinDb, (-6 - MinDb) / -MinDb, 1f }
             };
             lg.InterpolationColors = blend;
-            g.FillRectangle(lg, x, y, fw, h);
+            g.FillRectangle(lg, x + 1, y + 1, Math.Max(0, fw - 2), h - 2);
         }
         float hx = x + (hold - MinDb) / -MinDb * w;
         if (hold > MinDb + 0.5f)
-            using (var p = new Pen(Color.White, 2)) g.DrawLine(p, hx, y, hx, y + h);
+            using (var p = new Pen(Theme.Text, 2)) g.DrawLine(p, hx, y, hx, y + h);
     }
 }

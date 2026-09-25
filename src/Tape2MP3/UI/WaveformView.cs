@@ -627,7 +627,7 @@ public sealed class WaveformView : Control
         int top = WaveTop, h = WaveHeight;
         int laneH = h / 2;
 
-        using (var rb = new SolidBrush(Theme.Panel)) g.FillRectangle(rb, 0, 0, w, RulerH);
+        using (var rb = new SolidBrush(Theme.Ruler)) g.FillRectangle(rb, 0, 0, w, RulerH);
 
         if (_peaks == null || TotalFrames == 0)
         {
@@ -641,7 +641,7 @@ public sealed class WaveformView : Control
         DrawRuler(g, w);
 
         // corsie
-        using (var lane = new SolidBrush(Color.FromArgb(22, 22, 26)))
+        using (var lane = new SolidBrush(Theme.LaneBg))
         {
             g.FillRectangle(lane, 0, top, w, laneH - 1);
             g.FillRectangle(lane, 0, top + laneH, w, laneH - 1);
@@ -649,7 +649,7 @@ public sealed class WaveformView : Control
         using (var sep = new Pen(Theme.Border)) g.DrawLine(sep, 0, top + laneH - 1, w, top + laneH - 1);
 
         // guide -6 dB e centro
-        using (var guide = new Pen(Color.FromArgb(40, 40, 48)))
+        using (var guide = new Pen(Theme.LaneGuide))
         {
             for (int ch = 0; ch < 2; ch++)
             {
@@ -669,7 +669,7 @@ public sealed class WaveformView : Control
         DrawCuts(g, w, top, h);
 
         // zone escluse (prima dell'inizio e dopo la fine)
-        using (var shade = new SolidBrush(Color.FromArgb(150, 10, 10, 12)))
+        using (var shade = new SolidBrush(Theme.ShadeOut))
         {
             float xin = FrameToX(InFrame);
             if (xin > 0) g.FillRectangle(shade, 0, top, Math.Min(w, xin), h);
@@ -684,9 +684,9 @@ public sealed class WaveformView : Control
             if (x2 >= 0 && x1 <= w)
             {
                 float a = Math.Max(0, x1), b = Math.Min(w, x2);
-                using var sb = new SolidBrush(Color.FromArgb(55, 120, 170, 255));
+                using var sb = new SolidBrush(Theme.SelFill);
                 g.FillRectangle(sb, a, top, Math.Max(1, b - a), h);
-                using var sp = new Pen(Color.FromArgb(200, 140, 190, 255));
+                using var sp = new Pen(Theme.SelEdge);
                 g.DrawLine(sp, x1, top, x1, top + h);
                 g.DrawLine(sp, x2, top, x2, top + h);
             }
@@ -724,7 +724,7 @@ public sealed class WaveformView : Control
 
         // cursore
         float cx = FrameToX(CursorFrame);
-        if (cx >= 0 && cx <= w) using (var cp = new Pen(Color.FromArgb(220, 255, 255, 255))) g.DrawLine(cp, cx, 0, cx, top + h);
+        if (cx >= 0 && cx <= w) using (var cp = new Pen(Theme.CursorLine)) g.DrawLine(cp, cx, 0, cx, top + h);
 
         // testina di riproduzione
         if (PlayFrame >= 0)
@@ -763,9 +763,9 @@ public sealed class WaveformView : Control
     {
         if (_cuts.Count == 0) return;
         using var hatch = new System.Drawing.Drawing2D.HatchBrush(System.Drawing.Drawing2D.HatchStyle.WideDownwardDiagonal,
-            Color.FromArgb(150, 200, 50, 50), Color.FromArgb(170, 20, 10, 12));
+            Theme.CutHatchFore, Theme.CutHatchBack);
         using var f = new Font("Segoe UI", 8f, FontStyle.Bold);
-        using var tb = new SolidBrush(Color.FromArgb(255, 150, 150));
+        using var tb = new SolidBrush(Theme.CutText);
         foreach (var c in _cuts)
         {
             float x1 = FrameToX(c.Start), x2 = FrameToX(c.End);
@@ -786,7 +786,7 @@ public sealed class WaveformView : Control
         float fx = left ? x : x - sz.Width - 6;
         var r = new RectangleF(fx, top + h - sz.Height - 6, sz.Width + 6, sz.Height + 2);
         g.FillRectangle(b, r);
-        g.DrawString(label, font, Brushes.Black, r.X + 3, r.Y + 1);
+        g.DrawString(label, font, Theme.IsDark ? Brushes.Black : Brushes.White, r.X + 3, r.Y + 1);
     }
 
     private void DrawRuler(Graphics g, int w)
@@ -798,7 +798,7 @@ public sealed class WaveformView : Control
         double t0 = _viewStart / SampleRate;
         double first = Math.Floor(t0 / step) * step;
         using var f = new Font("Segoe UI", 7.5f);
-        using var tb = new SolidBrush(Theme.TextDim);
+        using var tb = new SolidBrush(Theme.RulerText);
         using var tp = new Pen(Theme.Border);
         for (double t = first; ; t += step)
         {

@@ -27,6 +27,12 @@ public sealed class MainForm : Form
     private readonly List<string> _titles = new();
     private DateTime _lowSince = DateTime.MaxValue;
     private GapAnalysis _analysis;
+    private Tone _statusTone = Tone.Dim;
+    private int _tickCount;
+    private AppInfo.UpdateInfo _update;
+    private TdButton _btnTheme;
+    private LinkLabel _lnkVersion, _lnkUpdate;
+    private Label _lblFooter;
     private bool _syncingGapGrid;
 
     // controlli
@@ -34,18 +40,18 @@ public sealed class MainForm : Form
     private CheckBox _chkMonitor;
     private LevelMeter _meter;
     private Label _lblSignal;
-    private Button _btnRec, _btnPause, _btnStop, _btnPlay, _btnOpen, _btnNew, _btnSettings, _btnRefresh;
+    private TdButton _btnRec, _btnPause, _btnStop, _btnPlay, _btnOpen, _btnNew, _btnSettings, _btnRefresh;
     private Label _lblTime, _lblStatus;
     private WaveformView _wave;
-    private Button _btnIn, _btnOut, _btnAutoTrim, _btnCutSel, _btnUndoCut, _btnDetect, _btnAddMarker, _btnClearMarkers, _btnZoomIn, _btnZoomOut, _btnFit;
+    private TdButton _btnIn, _btnOut, _btnAutoTrim, _btnCutSel, _btnUndoCut, _btnDetect, _btnAddMarker, _btnClearMarkers, _btnZoomIn, _btnZoomOut, _btnFit;
     private DataGridView _gapGrid;
     private Label _lblGaps;
-    private Button _btnAnalyze, _btnPrevGap, _btnNextGap, _btnGapCut, _btnGapSplit, _btnGapIgnore;
+    private TdButton _btnAnalyze, _btnPrevGap, _btnNextGap, _btnGapCut, _btnGapSplit, _btnGapIgnore;
     private DataGridView _grid;
     private ComboBox _cbFormat, _cbQuality, _cbDest;
     private CheckBox _chkSplit;
     private TextBox _txtFolder, _txtName;
-    private Button _btnExport;
+    private TdButton _btnExport;
     private ProgressBar _progress;
     private Label _lblExport;
 
@@ -57,7 +63,8 @@ public sealed class MainForm : Form
         AutoScaleDimensions = new SizeF(96f, 96f);
         AutoScaleMode = AutoScaleMode.Dpi;
 
-        Text = "Tape2MP3 — Riversaggio musicassette";
+        Theme.Set(Enum.TryParse<ThemeMode>(_s.Theme, out var tm) ? tm : ThemeMode.Automatico);
+        Text = $"Tape2MP3 v{AppInfo.Version} — Riversaggio musicassette";
         try { Icon = new Icon(typeof(MainForm).Assembly.GetManifestResourceStream("Tape2MP3.app.ico")); } catch { }
         BackColor = Theme.Back;
         ForeColor = Theme.Text;
@@ -82,17 +89,39 @@ public sealed class MainForm : Form
         _capture.DeviceStopped += ex => BeginInvoke(new Action(() =>
         {
             if (_state == State.Recording) DoPause();
-            SetStatus("Il dispositivo d'ingresso si è scollegato o è andato in errore: " + ex.Message, Theme.Rec);
+            SetStatus("Il dispositivo d'ingresso si è scollegato o è andato in errore: " + ex.Message, Tone.Error);
         }));
         _player.Finished += () => BeginInvoke(new Action(() => { _player.Stop(); _wave.PlayFrame = -1; UpdateUi(); }));
         _timer.Tick += OnTick;
+
+        Theme.Changed += OnThemeChanged;
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnSystemPrefChanged;
+        HandleCreated += (o, e) => Theme.SetDarkTitleBar(this);
+
+        // trascina un file audio sulla finestra per aprirlo
+        AllowDrop = true;
+        DragEnter += (o, e) =>
+        {
+            e.Effect = e.Data?.GetDataPresent(DataFormats.FileDrop) == true && (_state == State.Empty || _state == State.Stopped)
+                ? DragDropEffects.Copy : DragDropEffects.None;
+        };
+        DragDrop += async (o, e) =>
+        {
+            if (e.Data?.GetData(DataFormats.FileDrop) is not string[] files || files.Length == 0) return;
+            if (_state != State.Empty && _state != State.Stopped) return;
+            if (!DiscardCurrentKeepIfSame(files[0])) return;
+            await OpenAudio(files[0]);
+        };
 
         Load += (o, e) =>
         {
             LoadDevices();
             _timer.Start();
             UpdateUi();
+            UpdateFooter();
             BeginInvoke(new Action(CheckRecovery));
+            if (_s.CheckUpdates) _ = CheckUpdatesAsync(false);
+            else _lnkUpdate.Text = "controlla aggiornamenti";
         };
     }
 
@@ -104,17 +133,18 @@ public sealed class MainForm : Form
     {
         var root = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(10, 8, 10, 8), BackColor = Theme.Back
+            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 6, Padding = new Padding(10, 8, 10, 4), BackColor = Theme.Back
         };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));  // ingresso + meter
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));  // trasporto
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));  // forma d'onda
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));  // modifica
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 236)); // buchi + brani + export
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));  // barra inferiore
         Controls.Add(root);
 
         // --- riga 1: ingresso + livelli
-        var r1 = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 7, RowCount = 1, BackColor = Theme.Panel, Padding = new Padding(6, 4, 6, 4), Margin = new Padding(0, 0, 0, 6) };
+        var r1 = new TableLayoutPanel { Tag = "panel", Dock = DockStyle.Fill, ColumnCount = 8, RowCount = 1, BackColor = Theme.Panel, Padding = new Padding(6, 4, 6, 4), Margin = new Padding(0, 0, 0, 6) };
         r1.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         r1.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300));
         r1.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -122,12 +152,13 @@ public sealed class MainForm : Form
         r1.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         r1.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
         r1.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        r1.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         r1.Controls.Add(Theme.MakeLabel("Ingresso:", false), 0, 0);
         _cbDevice = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill, Margin = new Padding(3, 10, 3, 3) };
         Theme.StyleInput(_cbDevice);
         _cbDevice.SelectedIndexChanged += (o, e) => OpenSelectedDevice();
         r1.Controls.Add(_cbDevice, 1, 0);
-        _btnRefresh = Theme.MakeButton("⟳", null, 34); _btnRefresh.Height = 30; _btnRefresh.Margin = new Padding(3, 8, 3, 3);
+        _btnRefresh = Theme.MakeButton("⟳", BtnKind.Neutral, 34); _btnRefresh.Height = 30; _btnRefresh.Margin = new Padding(3, 8, 3, 3);
         _btnRefresh.Click += (o, e) => LoadDevices();
         new ToolTip().SetToolTip(_btnRefresh, "Aggiorna elenco dispositivi");
         r1.Controls.Add(_btnRefresh, 2, 0);
@@ -136,28 +167,32 @@ public sealed class MainForm : Form
         r1.Controls.Add(_chkMonitor, 3, 0);
         _meter = new LevelMeter { Dock = DockStyle.Fill, Margin = new Padding(6, 0, 6, 0) };
         r1.Controls.Add(_meter, 4, 0);
-        _lblSignal = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 9f, FontStyle.Bold), ForeColor = Theme.TextDim, Text = "—" };
+        _lblSignal = new Label { Tag = "keep", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 9f, FontStyle.Bold), ForeColor = Theme.TextDim, Text = "—" };
         r1.Controls.Add(_lblSignal, 5, 0);
-        _btnSettings = Theme.MakeButton("⚙", null, 40); _btnSettings.Height = 34; _btnSettings.Font = new Font("Segoe UI", 12f);
+        _btnSettings = Theme.MakeButton("⚙", BtnKind.Neutral, 40); _btnSettings.Height = 34; _btnSettings.Font = new Font("Segoe UI", 12f);
         _btnSettings.Click += (o, e) => OpenSettings();
         new ToolTip().SetToolTip(_btnSettings, "Impostazioni (destinazioni di rete, analisi buchi)");
         r1.Controls.Add(_btnSettings, 6, 0);
+        _btnTheme = Theme.MakeButton("◐", BtnKind.Neutral, 40); _btnTheme.Height = 34; _btnTheme.Font = new Font("Segoe UI Symbol", 12f);
+        _btnTheme.Margin = new Padding(3, 3, 0, 3);
+        _btnTheme.Click += (o, e) => CycleTheme();
+        r1.Controls.Add(_btnTheme, 7, 0);
         root.Controls.Add(r1, 0, 0);
 
         // --- riga 2: trasporto
         var r2 = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, BackColor = Theme.Back, Margin = new Padding(0) };
-        _btnRec = Theme.MakeButton("●  REGISTRA", Theme.Rec, 140);
-        _btnPause = Theme.MakeButton("❚❚  PAUSA", null, 120);
-        _btnStop = Theme.MakeButton("■  STOP", null, 110);
-        _btnPlay = Theme.MakeButton("▶  ASCOLTA", Theme.Accent, 130);
+        _btnRec = Theme.MakeButton("●  REGISTRA", BtnKind.Danger, 140);
+        _btnPause = Theme.MakeButton("❚❚  PAUSA", BtnKind.Neutral, 120);
+        _btnStop = Theme.MakeButton("■  STOP", BtnKind.Neutral, 110);
+        _btnPlay = Theme.MakeButton("▶  ASCOLTA", BtnKind.Primary, 130);
         _btnRec.Click += (o, e) => DoRecord();
         _btnPause.Click += (o, e) => DoPause();
         _btnStop.Click += (o, e) => DoStop();
         _btnPlay.Click += (o, e) => TogglePlay();
-        _lblTime = new Label { Text = "00:00", AutoSize = false, Width = 150, Height = 40, Font = new Font("Consolas", 20f, FontStyle.Bold), ForeColor = Theme.Text, TextAlign = ContentAlignment.MiddleCenter, Margin = new Padding(12, 2, 6, 0) };
-        _lblStatus = new Label { Text = "", AutoSize = false, Width = 420, Height = 40, ForeColor = Theme.TextDim, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(6, 2, 6, 0) };
-        _btnOpen = Theme.MakeButton("Apri file…", null, 110);
-        _btnNew = Theme.MakeButton("Nuova cassetta", null, 140);
+        _lblTime = new Label { Tag = "keep", Text = "00:00", AutoSize = false, Width = 150, Height = 40, Font = new Font("Consolas", 20f, FontStyle.Bold), ForeColor = Theme.Text, TextAlign = ContentAlignment.MiddleCenter, Margin = new Padding(12, 2, 6, 0) };
+        _lblStatus = new Label { Tag = "keep", Text = "", AutoSize = false, Width = 420, Height = 40, ForeColor = Theme.TextDim, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(6, 2, 6, 0) };
+        _btnOpen = Theme.MakeButton("Apri file…", BtnKind.Neutral, 110);
+        _btnNew = Theme.MakeButton("Nuova cassetta", BtnKind.Neutral, 140);
         _btnOpen.Click += (o, e) => DoOpenFile();
         _btnNew.Click += (o, e) => DoNew();
         r2.Controls.AddRange(new Control[] { _btnRec, _btnPause, _btnStop, Spacer(14), _btnPlay, _lblTime, _lblStatus, _btnOpen, _btnNew });
@@ -212,13 +247,13 @@ public sealed class MainForm : Form
         r5.Controls.Add(BuildGapPanel(), 0, 0);
 
         _grid = BuildTrackGrid();
-        var trackPanel = new Panel { Dock = DockStyle.Fill, Margin = new Padding(8, 0, 0, 0), BackColor = Theme.Panel };
-        var trackHdr = new Label { Text = "Brani (doppio click sul titolo per scriverlo)", Dock = DockStyle.Top, Height = 26, ForeColor = Theme.TextDim, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(6, 0, 0, 0) };
+        var trackPanel = new Panel { Tag = "panel", Dock = DockStyle.Fill, Margin = new Padding(8, 0, 0, 0), BackColor = Theme.Panel };
+        var trackHdr = new Label { Tag = "dim", Text = "Brani (doppio click sul titolo per scriverlo)", Dock = DockStyle.Top, Height = 26, ForeColor = Theme.TextDim, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(6, 0, 0, 0) };
         trackPanel.Controls.Add(_grid);
         trackPanel.Controls.Add(trackHdr);
         r5.Controls.Add(trackPanel, 1, 0);
 
-        var exp = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 5, BackColor = Theme.Panel, Padding = new Padding(8, 6, 8, 6), Margin = new Padding(8, 0, 0, 0) };
+        var exp = new TableLayoutPanel { Tag = "panel", Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 5, BackColor = Theme.Panel, Padding = new Padding(8, 6, 8, 6), Margin = new Padding(8, 0, 0, 0) };
         exp.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         exp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         exp.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -258,21 +293,51 @@ public sealed class MainForm : Form
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         bottom.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
         bottom.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        _btnExport = Theme.MakeButton("⬇  ESPORTA", Theme.Ok, 150); _btnExport.Height = 40;
+        _btnExport = Theme.MakeButton("⬇  ESPORTA", BtnKind.Success, 150); _btnExport.Height = 40;
         _btnExport.Click += (o, e) => DoExport();
         _progress = new ProgressBar { Dock = DockStyle.Fill, Margin = new Padding(6, 12, 3, 12), Maximum = 1000 };
-        _lblExport = new Label { Dock = DockStyle.Fill, ForeColor = Theme.TextDim, Text = "", AutoEllipsis = true };
+        _lblExport = new Label { Tag = "dim", Dock = DockStyle.Fill, ForeColor = Theme.TextDim, Text = "", AutoEllipsis = true };
         bottom.Controls.Add(_btnExport, 0, 0);
         bottom.Controls.Add(_progress, 1, 0);
         bottom.Controls.Add(_lblExport, 0, 1); bottom.SetColumnSpan(_lblExport, 2);
         exp.Controls.Add(bottom, 0, 4); exp.SetColumnSpan(bottom, 4);
+
+        // --- riga 6: barra inferiore (versione, aggiornamenti, disco)
+        var foot = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = new Padding(0, 2, 0, 0) };
+        foot.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        foot.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        foot.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _lnkVersion = new LinkLabel
+        {
+            Tag = "keep", AutoSize = true, Margin = new Padding(0, 5, 12, 0), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold),
+            Text = $"Tape2MP3 v{AppInfo.Version}" + (AppInfo.IsDevBuild ? "  (build di sviluppo)" : ""), LinkBehavior = LinkBehavior.HoverUnderline
+        };
+        _lnkVersion.LinkClicked += (o, e) => ShowAbout();
+        new ToolTip().SetToolTip(_lnkVersion, "Informazioni sul programma");
+        _lnkUpdate = new LinkLabel { Tag = "keep", AutoSize = true, Margin = new Padding(0, 5, 0, 0), Font = new Font("Segoe UI", 8.5f), Text = "", LinkBehavior = LinkBehavior.HoverUnderline };
+        _lnkUpdate.LinkClicked += (o, e) =>
+        {
+            if (_update?.IsNewer == true && _update.Url != null)
+                try { Process.Start(new ProcessStartInfo(_update.Url) { UseShellExecute = true }); } catch { }
+            else _ = CheckUpdatesAsync(true);
+        };
+        _lblFooter = new Label { Tag = "keep", AutoSize = true, Margin = new Padding(0, 5, 0, 0), Font = new Font("Segoe UI", 8.5f), ForeColor = Theme.TextDim };
+        foot.Controls.Add(_lnkVersion, 0, 0);
+        foot.Controls.Add(_lnkUpdate, 1, 0);
+        foot.Controls.Add(_lblFooter, 2, 0);
+        root.Controls.Add(foot, 0, 5);
+        StyleLinks();
+
+        new ToolTip().SetToolTip(_btnRec, "Registra / riprendi (anche accodare il lato B)");
+        new ToolTip().SetToolTip(_btnPlay, "Ascolta dal cursore, o solo la selezione  [Spazio]");
+        new ToolTip().SetToolTip(_btnOpen, "Apri un file audio o una registrazione (puoi anche trascinarlo sulla finestra)");
 
         RefreshDestinations();
     }
 
     private Control BuildGapPanel()
     {
-        var p = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = Theme.Panel, Margin = new Padding(0), Padding = new Padding(0) };
+        var p = new TableLayoutPanel { Tag = "panel", Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = Theme.Panel, Margin = new Padding(0), Padding = new Padding(0) };
         p.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
         p.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         p.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
@@ -280,8 +345,8 @@ public sealed class MainForm : Form
         var hdr = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0) };
         hdr.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         hdr.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        _lblGaps = new Label { Text = "Buchi da controllare", Dock = DockStyle.Fill, ForeColor = Theme.Gap, Font = new Font("Segoe UI", 9f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(6, 0, 0, 0), AutoEllipsis = true };
-        _btnAnalyze = Theme.MakeButton("Rianalizza", null, 90); _btnAnalyze.Height = 26; _btnAnalyze.Font = new Font("Segoe UI", 8.5f); _btnAnalyze.Margin = new Padding(2);
+        _lblGaps = new Label { Tag = "keep", Text = "Buchi da controllare", Dock = DockStyle.Fill, ForeColor = Theme.Gap, Font = new Font("Segoe UI", 9f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(6, 0, 0, 0), AutoEllipsis = true };
+        _btnAnalyze = Theme.MakeButton("Rianalizza", BtnKind.Neutral, 90); _btnAnalyze.Height = 26; _btnAnalyze.Font = new Font("Segoe UI", 8.5f); _btnAnalyze.Margin = new Padding(2);
         _btnAnalyze.Click += async (o, e) => await RunAnalysis();
         hdr.Controls.Add(_lblGaps, 0, 0);
         hdr.Controls.Add(_btnAnalyze, 1, 0);
@@ -315,9 +380,9 @@ public sealed class MainForm : Form
         return p;
     }
 
-    private Button GapBtn(string text, int w, Action a)
+    private TdButton GapBtn(string text, int w, Action a)
     {
-        var b = Theme.MakeButton(text, null, w);
+        var b = Theme.MakeButton(text, BtnKind.Neutral, w);
         b.Height = 30; b.Font = new Font("Segoe UI", 8.5f);
         b.Margin = new Padding(2, 4, 2, 2);
         b.Click += (o, e) => a();
@@ -344,13 +409,7 @@ public sealed class MainForm : Form
             EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2,
             Margin = new Padding(0)
         };
-        g.DefaultCellStyle.BackColor = Theme.Panel;
-        g.DefaultCellStyle.ForeColor = Theme.Text;
-        g.DefaultCellStyle.SelectionBackColor = Color.FromArgb(50, 80, 140);
-        g.DefaultCellStyle.SelectionForeColor = Color.White;
-        g.ColumnHeadersDefaultCellStyle.BackColor = Theme.Panel2;
-        g.ColumnHeadersDefaultCellStyle.ForeColor = Theme.TextDim;
-        g.ColumnHeadersDefaultCellStyle.SelectionBackColor = Theme.Panel2;
+        Theme.StyleGrid(g);
         g.RowTemplate.Height = 22;
         return g;
     }
@@ -395,9 +454,9 @@ public sealed class MainForm : Form
 
     private static Control Spacer(int w) => new Panel { Width = w, Height = 10, Margin = new Padding(0) };
 
-    private Button SmallBtn(string text, int w, Action a)
+    private TdButton SmallBtn(string text, int w, Action a)
     {
-        var b = Theme.MakeButton(text, null, w);
+        var b = Theme.MakeButton(text, BtnKind.Neutral, w);
         b.Height = 32; b.Font = new Font("Segoe UI", 9f);
         b.Margin = new Padding(2, 6, 2, 2);
         b.Click += (o, e) => a();
@@ -447,7 +506,7 @@ public sealed class MainForm : Form
         if (_state == State.Recording || _state == State.Paused) return;
         List<InputDevice> list;
         try { list = CaptureEngine.ListDevices(); }
-        catch (Exception ex) { SetStatus("Impossibile elencare i dispositivi audio: " + ex.Message, Theme.Rec); return; }
+        catch (Exception ex) { SetStatus("Impossibile elencare i dispositivi audio: " + ex.Message, Tone.Error); return; }
 
         _cbDevice.Items.Clear();
         foreach (var d in list) _cbDevice.Items.Add(d);
@@ -460,7 +519,7 @@ public sealed class MainForm : Form
         if (list.Count == 0)
         {
             _capture.Close();
-            SetStatus("Nessun dispositivo di registrazione trovato. Collega il lettore USB e premi ⟳.", Theme.Warn);
+            SetStatus("Nessun dispositivo di registrazione trovato. Collega il lettore USB e premi ⟳.", Tone.Warn);
             return;
         }
         _cbDevice.SelectedIndex = idx; // scatena OpenSelectedDevice
@@ -476,11 +535,11 @@ public sealed class MainForm : Form
             _capture.SetMonitor(_chkMonitor.Checked);
             _s.DeviceId = d.Id;
             _meter.Reset();
-            SetStatus($"Ingresso pronto: {d.Name} ({_capture.SampleRate} Hz). Regola il volume e premi REGISTRA.", Theme.TextDim);
+            SetStatus($"Ingresso pronto: {d.Name} ({_capture.SampleRate} Hz). Regola il volume e premi REGISTRA.", Tone.Dim);
         }
         catch (Exception ex)
         {
-            SetStatus($"Impossibile aprire \"{d.Name}\": {ex.Message}", Theme.Rec);
+            SetStatus($"Impossibile aprire \"{d.Name}\": {ex.Message}", Tone.Error);
         }
         UpdateUi();
     }
@@ -491,7 +550,7 @@ public sealed class MainForm : Form
 
     private void DoRecord()
     {
-        if (!_capture.IsOpen) { SetStatus("Nessun ingresso aperto: scegli il dispositivo.", Theme.Warn); return; }
+        if (!_capture.IsOpen) { SetStatus("Nessun ingresso aperto: scegli il dispositivo.", Tone.Warn); return; }
         StopPlayback();
 
         if (_state == State.Paused)
@@ -500,7 +559,7 @@ public sealed class MainForm : Form
             _capture.StartRecording(_writer, _peaks);
             _state = State.Recording;
             _wave.LiveMode = true;
-            SetStatus("Registrazione ripresa.", Theme.Rec);
+            SetStatus("Registrazione ripresa.", Tone.Rec);
             UpdateUi();
             return;
         }
@@ -523,14 +582,20 @@ public sealed class MainForm : Form
                 _state = State.Recording;
                 _exported = false;
                 _wave.LiveMode = true;
-                SetStatus("Registrazione accodata (lato B).", Theme.Rec);
+                SetStatus("Registrazione accodata (lato B).", Tone.Rec);
                 UpdateUi();
                 return;
             }
             if (!DiscardCurrent(askIfNotExported: true)) return;
         }
 
-        // nuova registrazione
+        // nuova registrazione: controllo spazio (circa 11 MB al minuto a 48 kHz)
+        long free = FreeSpace(AppSettings.WorkDir);
+        if (free >= 0 && free < 1L << 30)
+        {
+            if (MessageBox.Show(this, $"Sul disco della cartella di lavoro restano solo {Theme.FormatBytes(free)} (bastano per circa {free / (_capture.SampleRate * 4L * 60):0} minuti).\nRegistrare lo stesso?",
+                    "Spazio su disco", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+        }
         try
         {
             Directory.CreateDirectory(AppSettings.WorkDir);
@@ -547,7 +612,7 @@ public sealed class MainForm : Form
             ApplyCaptureSettings();
             _capture.StartRecording(_writer, _peaks);
             _state = State.Recording;
-            SetStatus("In registrazione… Fai partire la cassetta. A fine lato: PAUSA, gira la cassetta, RIPRENDI.", Theme.Rec);
+            SetStatus("In registrazione… Fai partire la cassetta. A fine lato: PAUSA, gira la cassetta, RIPRENDI.", Tone.Rec);
         }
         catch (Exception ex)
         {
@@ -580,12 +645,13 @@ public sealed class MainForm : Form
             Text = "C'è già una registrazione aperta.\nVuoi continuare accodando (es. il lato B) oppure iniziare una nuova cassetta?",
             Location = new Point(16, 16), Size = new Size(450, 60)
         });
-        var a = Theme.MakeButton("Accoda (lato B)", Theme.Rec, 150); a.DialogResult = DialogResult.Yes; a.Location = new Point(16, 94);
-        var n = Theme.MakeButton("Nuova cassetta", null, 150); n.DialogResult = DialogResult.No; n.Location = new Point(172, 94);
-        var c = Theme.MakeButton("Annulla", null, 130); c.DialogResult = DialogResult.Cancel; c.Location = new Point(334, 94);
+        var a = Theme.MakeButton("Accoda (lato B)", BtnKind.Danger, 150); a.DialogResult = DialogResult.Yes; a.Location = new Point(16, 94);
+        var n = Theme.MakeButton("Nuova cassetta", BtnKind.Neutral, 150); n.DialogResult = DialogResult.No; n.Location = new Point(172, 94);
+        var c = Theme.MakeButton("Annulla", BtnKind.Neutral, 130); c.DialogResult = DialogResult.Cancel; c.Location = new Point(334, 94);
         f.Controls.AddRange(new Control[] { a, n, c });
         f.AcceptButton = a; f.CancelButton = c;
         f.ResumeLayout(false);
+        f.HandleCreated += (o, e) => Theme.SetDarkTitleBar(f);
         return f.ShowDialog(this);
     }
 
@@ -596,7 +662,7 @@ public sealed class MainForm : Form
         _state = State.Paused;
         _wave.LiveMode = false;
         _wave.ZoomToFit();
-        SetStatus("In pausa. Gira la cassetta e premi RIPRENDI per continuare, oppure STOP per finire.", Theme.Warn);
+        SetStatus("In pausa. Gira la cassetta e premi RIPRENDI per continuare, oppure STOP per finire.", Tone.Warn);
         UpdateUi();
     }
 
@@ -604,7 +670,7 @@ public sealed class MainForm : Form
     {
         if (_state != State.Recording) return;
         DoPause();
-        SetStatus($"Pausa automatica: {_s.AutoPauseSec:0} s di silenzio (fine lato?). Gira la cassetta e premi RIPRENDI, oppure STOP.", Theme.Warn);
+        SetStatus($"Pausa automatica: {_s.AutoPauseSec:0} s di silenzio (fine lato?). Gira la cassetta e premi RIPRENDI, oppure STOP.", Tone.Warn);
         SystemSounds.Exclamation.Play();
         FlashWindow();
     }
@@ -661,7 +727,7 @@ public sealed class MainForm : Form
         if (DiscardCurrent(askIfNotExported: true))
         {
             _txtName.Text = "Cassetta";
-            SetStatus("Pronto per una nuova cassetta.", Theme.TextDim);
+            SetStatus("Pronto per una nuova cassetta.", Tone.Dim);
         }
         UpdateUi();
     }
@@ -722,7 +788,7 @@ public sealed class MainForm : Form
                 var ff = Exporter.FindFfmpeg();
                 if (ff == null) throw new Exception("ffmpeg.exe non trovato accanto al programma.");
                 wav = Path.Combine(AppSettings.WorkDir, $"Import_{DateTime.Now:yyyyMMdd_HHmmss}.wav");
-                SetStatus("Conversione del file in corso…", Theme.TextDim);
+                SetStatus("Conversione del file in corso…", Tone.Dim);
                 await Exporter.ConvertToInternalAsync(ff, file, wav, _cts.Token);
             }
             else
@@ -730,7 +796,7 @@ public sealed class MainForm : Form
                 WavFile.RepairHeader(wav);
             }
 
-            SetStatus("Lettura forma d'onda…", Theme.TextDim);
+            SetStatus("Lettura forma d'onda…", Tone.Dim);
             var prog = new Progress<double>(p => _progress.Value = (int)(Math.Clamp(p, 0, 1) * 1000));
             var peaks = await Task.Run(() => PeakData.FromFile(wav, prog, _cts.Token));
             _progress.Value = 0;
@@ -746,14 +812,14 @@ public sealed class MainForm : Form
             _wave.ZoomToFit();
             _state = State.Stopped;
             _txtName.Text = Path.GetFileNameWithoutExtension(file).StartsWith("Registrazione_") ? "Cassetta" : Path.GetFileNameWithoutExtension(file);
-            SetStatus($"Aperto: {Path.GetFileName(file)} ({Theme.FormatTime(Sec(peaks.Frames))}).", Theme.Ok);
+            SetStatus($"Aperto: {Path.GetFileName(file)} ({Theme.FormatTime(Sec(peaks.Frames))}).", Tone.Ok);
             RefreshTracks();
             ok = true;
         }
         catch (Exception ex)
         {
             _state = _wavPath != null ? State.Stopped : State.Empty;
-            SetStatus("Impossibile aprire il file: " + ex.Message, Theme.Rec);
+            SetStatus("Impossibile aprire il file: " + ex.Message, Tone.Error);
         }
         finally
         {
@@ -794,7 +860,7 @@ public sealed class MainForm : Form
         _cts = new CancellationTokenSource();
         try
         {
-            SetStatus("Analizzo la registrazione: misuro il fruscio e cerco i buchi…", Theme.TextDim);
+            SetStatus("Analizzo la registrazione: misuro il fruscio e cerco i buchi…", Tone.Dim);
             var prog = new Progress<double>(p => _progress.Value = (int)(Math.Clamp(p, 0, 1) * 1000));
             string path = _wavPath;
             var a = await Task.Run(() => GapAnalyzer.Analyze(path, _s.GapMarginDb, _s.MinGapSec, _s.MinSilenceSec, _s.DetectDrops, prog, _cts.Token));
@@ -807,10 +873,10 @@ public sealed class MainForm : Form
             SetStatus(n == 0
                 ? $"Registrazione pulita: nessun buco trovato (fruscio a {a.NoiseFloorDb:0} dB). Puoi esportare."
                 : $"Trovati {n} punti da controllare (arancione sul righello). Usa N / P per spostarti, poi Taglia, Dividi o \"Va bene così\".",
-                n == 0 ? Theme.Ok : Theme.Gap);
+                n == 0 ? Tone.Ok : Tone.Gap);
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { SetStatus("Errore nell'analisi: " + ex.Message, Theme.Rec); }
+        catch (Exception ex) { SetStatus("Errore nell'analisi: " + ex.Message, Tone.Error); }
         finally
         {
             _progress.Value = 0;
@@ -840,6 +906,7 @@ public sealed class MainForm : Form
         }
         finally { _syncingGapGrid = false; }
 
+        _lblGaps.ForeColor = Theme.Gap;
         if (_analysis == null) _lblGaps.Text = _peaks == null ? "Buchi da controllare" : "Buchi da controllare (analisi dopo lo STOP)";
         else _lblGaps.Text = $"Da controllare: {_wave.Gaps.Count}   ·   fruscio {_analysis.NoiseFloorDb:0} dB, musica {_analysis.MusicDb:0} dB";
     }
@@ -927,7 +994,7 @@ public sealed class MainForm : Form
         RefreshGaps();
         if (_wave.Gaps.Count == 0)
         {
-            SetStatus("Tutti i punti sono stati controllati. Puoi esportare.", Theme.Ok);
+            SetStatus("Tutti i punti sono stati controllati. Puoi esportare.", Tone.Ok);
             UpdateUi();
             return;
         }
@@ -961,7 +1028,7 @@ public sealed class MainForm : Form
             _wave.SetCursor(from, false);
             UpdateUi();
         }
-        catch (Exception ex) { SetStatus("Errore di riproduzione: " + ex.Message, Theme.Rec); }
+        catch (Exception ex) { SetStatus("Errore di riproduzione: " + ex.Message, Tone.Error); }
     }
 
     private void StopPlayback()
@@ -992,18 +1059,18 @@ public sealed class MainForm : Form
             if (first != null) a = Math.Max(0, first.End - margin);
             if (last != null) b = Math.Min(_wave.TotalFrames, last.Start + margin);
             _wave.SetInOut(a, b);
-            SetStatus($"INIZIO/FINE impostati: {Theme.FormatTime(Sec(a))} → {Theme.FormatTime(Sec(b))}. Trascina le bandierine per ritoccare.", Theme.Ok);
+            SetStatus($"INIZIO/FINE impostati: {Theme.FormatTime(Sec(a))} → {Theme.FormatTime(Sec(b))}. Trascina le bandierine per ritoccare.", Tone.Ok);
             return;
         }
         _state = State.Busy; UpdateUi();
         try
         {
-            SetStatus("Cerco l'inizio e la fine della musica…", Theme.TextDim);
+            SetStatus("Cerco l'inizio e la fine della musica…", Tone.Dim);
             var (s, e) = await Task.Run(() => SilenceDetector.DetectContent(_wavPath, _s.SilenceDb));
             _wave.SetInOut(s, e);
-            SetStatus($"INIZIO/FINE impostati: {Theme.FormatTime(Sec(s))} → {Theme.FormatTime(Sec(e))}. Trascina le bandierine per ritoccare.", Theme.Ok);
+            SetStatus($"INIZIO/FINE impostati: {Theme.FormatTime(Sec(s))} → {Theme.FormatTime(Sec(e))}. Trascina le bandierine per ritoccare.", Tone.Ok);
         }
-        catch (Exception ex) { SetStatus("Errore: " + ex.Message, Theme.Rec); }
+        catch (Exception ex) { SetStatus("Errore: " + ex.Message, Tone.Error); }
         finally { _state = State.Stopped; UpdateUi(); }
     }
 
@@ -1014,14 +1081,14 @@ public sealed class MainForm : Form
         long len = _wave.SelEnd - _wave.SelStart;
         _wave.CutSelection();
         RefreshGaps();
-        SetStatus($"Tagliati {Sec(len):0.0} s. Il file originale non viene toccato: \"Annulla taglio\" o tasto destro → Ripristina.", Theme.Ok);
+        SetStatus($"Tagliati {Sec(len):0.0} s. Il file originale non viene toccato: \"Annulla taglio\" o tasto destro → Ripristina.", Tone.Ok);
     }
 
     /// <summary>Mette le divisioni al centro delle pause fra brani trovate dall'analisi.</summary>
     private void DoSplitOnPauses()
     {
         if (_state != State.Stopped) return;
-        if (_analysis == null) { SetStatus("Prima serve l'analisi: premi \"Rianalizza\".", Theme.Warn); return; }
+        if (_analysis == null) { SetStatus("Prima serve l'analisi: premi \"Rianalizza\".", Tone.Warn); return; }
         long a = _wave.InFrame, b = _wave.EffectiveOut;
         long minTrack = (long)(_s.MinTrackSec * _takeRate);
         var cuts = new List<long>();
@@ -1037,7 +1104,7 @@ public sealed class MainForm : Form
         _chkSplit.Checked = true;
         SetStatus(cuts.Count == 0
             ? "Nessuna pausa fra brani abbastanza lunga. Aggiungi le divisioni a mano (M o doppio click)."
-            : $"{cuts.Count + 1} brani. Controlla le divisioni gialle e trascinale se serve.", cuts.Count == 0 ? Theme.Warn : Theme.Ok);
+            : $"{cuts.Count + 1} brani. Controlla le divisioni gialle e trascinale se serve.", cuts.Count == 0 ? Tone.Warn : Tone.Ok);
     }
 
     private void OnEditsChanged()
@@ -1165,7 +1232,7 @@ public sealed class MainForm : Form
             _exported = true;
             _dirtyAfterExport = false;
             _lblExport.Text = $"✔ Esportati {files.Count} file in {folder}";
-            SetStatus($"Esportazione completata: {files.Count} file.", Theme.Ok);
+            SetStatus($"Esportazione completata: {files.Count} file.", Tone.Ok);
             SystemSounds.Asterisk.Play();
             if (_s.OpenFolderAfterExport)
                 try { Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true }); } catch { }
@@ -1202,13 +1269,16 @@ public sealed class MainForm : Form
             _s.Save();
             RefreshDestinations();
             ApplyCaptureSettings();
+            var newMode = Enum.TryParse<ThemeMode>(_s.Theme, out var tm2) ? tm2 : ThemeMode.Automatico;
+            if (newMode != Theme.Mode) Theme.Set(newMode);
             if (_state == State.Stopped && _analysis != null)
-                SetStatus("Impostazioni salvate. Premi \"Rianalizza\" per applicarle ai buchi.", Theme.TextDim);
+                SetStatus("Impostazioni salvate. Premi \"Rianalizza\" per applicarle ai buchi.", Tone.Dim);
         }
     }
 
     private void OnTick(object sender, EventArgs e)
     {
+        if (++_tickCount % 60 == 0) UpdateFooter(); // ogni ~2 s
         if (_capture.IsOpen)
         {
             _capture.ReadLevels(out float l, out float r, out bool clip);
@@ -1294,13 +1364,105 @@ public sealed class MainForm : Form
         UpdateInfo();
     }
 
-    private void SetStatus(string text, Color color)
+    private void SetStatus(string text, Tone tone)
     {
+        _statusTone = tone;
         _lblStatus.Text = text;
-        _lblStatus.ForeColor = color;
+        _lblStatus.ForeColor = Theme.ToneColor(tone);
     }
 
     private double Sec(long frames) => (double)frames / Math.Max(1, _takeRate > 0 ? _takeRate : (_capture.SampleRate > 0 ? _capture.SampleRate : 48000));
+
+    // =====================================================================================
+    // Tema, versione, barra inferiore
+    // =====================================================================================
+
+    private void CycleTheme()
+    {
+        var next = Theme.Next(Theme.Mode);
+        _s.Theme = next.ToString();
+        _s.Save();
+        Theme.Set(next);
+        SetStatus($"Tema: {next}" + (next == ThemeMode.Automatico ? " (segue Windows)" : ""), Tone.Dim);
+    }
+
+    private void OnSystemPrefChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category != Microsoft.Win32.UserPreferenceCategory.General || Theme.Mode != ThemeMode.Automatico) return;
+        if (IsHandleCreated) BeginInvoke(new Action(() => Theme.Set(ThemeMode.Automatico)));
+    }
+
+    private void OnThemeChanged()
+    {
+        SuspendLayout();
+        Theme.ApplyTo(this);
+        _lblStatus.ForeColor = Theme.ToneColor(_statusTone);
+        _lblGaps.ForeColor = Theme.Gap;
+        StyleLinks();
+        RefreshGaps();
+        RefreshTracks();
+        UpdateFooter();
+        ResumeLayout(true);
+        Invalidate(true);
+    }
+
+    private void StyleLinks()
+    {
+        foreach (var l in new[] { _lnkVersion, _lnkUpdate })
+        {
+            l.LinkColor = l == _lnkUpdate && _update?.IsNewer == true ? Theme.Ok : Theme.Accent;
+            l.ActiveLinkColor = Theme.Rec;
+            l.VisitedLinkColor = l.LinkColor;
+        }
+        _themeTip ??= new ToolTip();
+        _themeTip.SetToolTip(_btnTheme, $"Tema: {Theme.Mode} — click per cambiare (Automatico → Chiaro → Scuro)");
+    }
+    private ToolTip _themeTip;
+
+    private async Task CheckUpdatesAsync(bool manual)
+    {
+        _lnkUpdate.Text = "controllo aggiornamenti…";
+        var u = await AppInfo.CheckAsync(string.IsNullOrWhiteSpace(_s.UpdateRepo) ? AppInfo.DefaultRepo : _s.UpdateRepo);
+        _update = u;
+        if (u == null) _lnkUpdate.Text = manual ? "impossibile controllare gli aggiornamenti (offline o repo privato) — riprova" : "controlla aggiornamenti";
+        else if (u.IsNewer)
+        {
+            _lnkUpdate.Text = $"⬆ Disponibile la versione {u.LatestVersion} — clicca per scaricarla";
+            if (manual) SystemSounds.Asterisk.Play();
+        }
+        else _lnkUpdate.Text = $"✔ è l'ultima versione ({u.LatestVersion})";
+        StyleLinks();
+    }
+
+    private void ShowAbout()
+    {
+        using var f = new AboutForm(_s, _update);
+        f.ShowDialog(this);
+        if (f.UpdateResult != null) { _update = f.UpdateResult; _ = CheckUpdatesAsync(false); }
+    }
+
+    private static long FreeSpace(string dir)
+    {
+        try { return new DriveInfo(Path.GetPathRoot(Path.GetFullPath(dir))!).AvailableFreeSpace; }
+        catch { return -1; }
+    }
+
+    private void UpdateFooter()
+    {
+        var parts = new List<string>();
+        if (_capture.IsOpen) parts.Add($"{_capture.SampleRate / 1000.0:0.#} kHz · 16 bit stereo");
+        if (_wavPath != null && File.Exists(_wavPath))
+            try { parts.Add("registrazione " + Theme.FormatBytes(new FileInfo(_wavPath).Length)); } catch { }
+        long free = FreeSpace(AppSettings.WorkDir);
+        if (free >= 0)
+        {
+            int rate = _capture.SampleRate > 0 ? _capture.SampleRate : 48000;
+            double hours = free / (rate * 4.0 * 3600);
+            parts.Add($"disco: {Theme.FormatBytes(free)} liberi (~{(hours >= 10 ? hours.ToString("0") : hours.ToString("0.0"))} h di registrazione)");
+            _lblFooter.ForeColor = free < 2L << 30 ? Theme.Warn : Theme.TextDim;
+        }
+        _lblFooter.Text = string.Join("   ·   ", parts);
+    }
 
     // =====================================================================================
     // Tastiera
@@ -1404,6 +1566,8 @@ public sealed class MainForm : Form
         if (_cbFormat.SelectedItem is ExportFormat f) _s.Format = f.Key;
         _s.Save();
 
+        Theme.Changed -= OnThemeChanged;
+        Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnSystemPrefChanged;
         _timer.Stop();
         _player.Dispose();
         _capture.Dispose();

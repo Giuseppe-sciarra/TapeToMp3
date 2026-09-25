@@ -63,6 +63,11 @@ public sealed class AppSettings
     public double AutoPauseSec { get; set; } = 60;
     public double SilenceDb { get; set; } = -50;
 
+    // --- aspetto / aggiornamenti
+    public string Theme { get; set; } = "Automatico";   // Automatico | Chiaro | Scuro
+    public bool CheckUpdates { get; set; } = true;
+    public string UpdateRepo { get; set; } = AppInfo.DefaultRepo;
+
     public int WinX { get; set; } = -1;
     public int WinY { get; set; } = -1;
     public int WinW { get; set; } = 1280;
