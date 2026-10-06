@@ -2,7 +2,7 @@ name: Build Tape2MP3
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
     tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
@@ -41,7 +41,13 @@ jobs:
             $release = "true"
           }
           else {
-            $v = "0.0.${{ github.run_number }}"
+            # push su main: build incrementale v<major.minor del csproj>.<numero di esecuzione>, pubblicata come release
+            [xml]$proj = Get-Content "src/Tape2MP3/Tape2MP3.csproj"
+            $base = ($proj.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1)
+            if (-not $base) { $base = "1.0.0" }
+            $mm = ($base -split '\.')[0..1] -join '.'
+            $v = "$mm.${{ github.run_number }}"
+            $release = "true"
           }
           "version=$v"     >> $env:GITHUB_OUTPUT
           "release=$release" >> $env:GITHUB_OUTPUT
@@ -87,6 +93,7 @@ jobs:
           tag_name: v${{ steps.ver.outputs.version }}
           name: Tape2MP3 v${{ steps.ver.outputs.version }}
           target_commitish: ${{ github.sha }}
+          make_latest: true
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
           generate_release_notes: true
           files: Tape2MP3-${{ steps.ver.outputs.version }}-win-x64.zip
