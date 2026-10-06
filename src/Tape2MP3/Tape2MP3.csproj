@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -11,7 +11,7 @@
     <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
     <AssemblyName>Tape2MP3</AssemblyName>
     <RootNamespace>Tape2MP3</RootNamespace>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Product>Tape2MP3</Product>
     <Company>Tastiere Digitali</Company>
     <Description>Riversaggio musicassette in MP3/FLAC/WAV/M4A</Description>

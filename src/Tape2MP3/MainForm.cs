@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Media;
 using Tape2MP3.Audio;
 using Tape2MP3.Export;
@@ -11,6 +11,12 @@ public sealed class MainForm : Form
     private enum State { Empty, Recording, Paused, Stopped, Busy }
 
     private readonly AppSettings _s;
+
+    private CrmSessione _crm;
+
+    private CrmBanda _crmBanda;
+
+    private readonly CrmImpostazioni _crmImp = new();
     private readonly CaptureEngine _capture = new();
     private readonly PlaybackEngine _player = new();
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 33 };
@@ -72,6 +78,12 @@ public sealed class MainForm : Form
         KeyPreview = true;
 
         BuildUi();
+        // ── CRM: banda in alto con il cliente e le musicassette fatte/totali (stesso giro di VHSCapture) ──
+        _crmImp.Attivo = _s.CrmAttivo; _crmImp.Url = _s.CrmUrl ?? ""; _crmImp.Token = _s.CrmToken ?? ""; _crmImp.UltimoCliente = _s.CrmUltimoCliente;
+        _crm = new CrmSessione(_crmImp, imp => { _s.CrmAttivo = imp.Attivo; _s.CrmUrl = imp.Url; _s.CrmToken = imp.Token; _s.CrmUltimoCliente = imp.UltimoCliente; _s.Save(); }, AppInfo.Version);
+        _crmBanda = new CrmBanda(_crm, this);
+        Controls.Add(_crmBanda);
+        Shown += async (_, _) => { await _crm.RiprendiUltimo(); };
         ResumeLayout(false);
         PerformLayout();
 
@@ -548,7 +560,7 @@ public sealed class MainForm : Form
     // Registrazione
     // =====================================================================================
 
-    private void DoRecord()
+    private async void DoRecord()
     {
         if (!_capture.IsOpen) { SetStatus("Nessun ingresso aperto: scegli il dispositivo.", Tone.Warn); return; }
         StopPlayback();
@@ -589,6 +601,8 @@ public sealed class MainForm : Form
             if (!DiscardCurrent(askIfNotExported: true)) return;
         }
 
+        if (!await _crm.PreparaCliente(this)) return;      // per quale cliente del CRM? (se il collegamento è attivo)
+
         // nuova registrazione: controllo spazio (circa 11 MB al minuto a 48 kHz)
         long free = FreeSpace(AppSettings.WorkDir);
         if (free >= 0 && free < 1L << 30)
@@ -612,6 +626,7 @@ public sealed class MainForm : Form
             ApplyCaptureSettings();
             _capture.StartRecording(_writer, _peaks);
             _state = State.Recording;
+            _ = _crm.Inizio(Path.GetFileName(_wavPath));       // nel CRM: «📻 PC · Rossi · riversa la musicassetta 1ª di 3»
             SetStatus("In registrazione… Fai partire la cassetta. A fine lato: PAUSA, gira la cassetta, RIPRENDI.", Tone.Rec);
         }
         catch (Exception ex)
@@ -1231,6 +1246,7 @@ public sealed class MainForm : Form
             var files = await Exporter.ExportAsync(ff, _wavPath, _takeRate, segs, cutsCopy, folder, baseName, fmt, quality, baseName, prog, _cts.Token);
             _exported = true;
             _dirtyAfterExport = false;
+            await _crm.ChiediFine(this, 1, baseName + " → " + folder, false);    // una musicassetta riversata per il CRM
             _lblExport.Text = $"✔ Esportati {files.Count} file in {folder}";
             SetStatus($"Esportazione completata: {files.Count} file.", Tone.Ok);
             SystemSounds.Asterisk.Play();

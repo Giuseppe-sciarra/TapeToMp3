@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -67,6 +67,12 @@ public sealed class AppSettings
     public string Theme { get; set; } = "Automatico";   // Automatico | Chiaro | Scuro
     public bool CheckUpdates { get; set; } = true;
     public string UpdateRepo { get; set; } = AppInfo.DefaultRepo;
+
+    // --- collegamento al CRM Tastiere Digitali (stesse API di VHSCapture, tipo «musicassette da riversare»)
+    public bool CrmAttivo { get; set; }
+    public string CrmUrl { get; set; } = "";
+    public string CrmToken { get; set; } = "";
+    public int CrmUltimoCliente { get; set; }
 
     public int WinX { get; set; } = -1;
     public int WinY { get; set; } = -1;
