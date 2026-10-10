@@ -2,6 +2,8 @@
 
 Riversaggio musicassette → MP3 / FLAC / WAV / M4A. Niente di più.
 
+**Download, guida e domande frequenti:** [tastieredigitali.tech/casi-studio/tape2mp3](https://tastieredigitali.tech/casi-studio/tape2mp3/)
+
 ## Come si usa
 
 1. **Ingresso**: scegli il lettore USB (viene proposto da solo se nel nome c'è "USB"). I VU meter si muovono già: fai partire la cassetta e controlla che la scritta a destra dica *livello OK* (mai *TROPPO ALTO*).
