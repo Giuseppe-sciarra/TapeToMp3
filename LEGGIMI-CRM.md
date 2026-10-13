@@ -16,10 +16,13 @@ il blocco **Riversaggio / Backup** della scheda del cliente, quando il supporto 
   totale scende, il prezzo si ricalcola) · **Non contare**. Annullato o errore → non si conta niente.
 - **Cartella del cliente** (come VHSCapture): con un cliente scelto si salva dentro la sua cartella «Nome Cognome», creata se non c'è,
   nella destinazione scelta (Tape2MP3: prima della sottocartella; DiscRipper: prima di Artista\Album). Si spegne nel ⚙ del collegamento al CRM.
-- **Tape2MP3, lati della cassetta**: accanto ai comandi scegli «2 lati» (di norma) o «1 lato». Con 2 lati la musicassetta conta come fatta
-  solo quando la registrazione contiene anche il lato B: il lato passa da solo al B quando riprendi dopo la pausa (cassetta girata) o accodi
-  il lato B, e il pulsante «Lato A/B» lo corregge. Se esporti solo il lato A non si conta niente: giri, REGISTRA + → «Accoda (lato B)» ed
-  esporti di nuovo (i file del lato A vengono sostituiti, niente doppioni). Se passi a un'altra cassetta senza il lato B, chiede se contarla
-  così (aveva un lato solo) o no.
+- **Tape2MP3, lati della cassetta**: accanto ai comandi scegli «2 lati» (di norma) o «1 lato». Con 2 lati **lato A e lato B
+  sono due cose separate**: a fine lato A premi «Passa al lato B» (mette in pausa e segna la divisione), giri la cassetta e RIPRENDI
+  (se riprendi da una pausa ti chiede se è il lato B). All'esportazione escono file separati: «Nome - Lato A» e «Nome - Lato B»
+  (file unico per lato) oppure A01, A02… e B01, B02… (un file per brano), con il tag disco 1/2 e 2/2. La divisione si vede sulla
+  forma d'onda («LATO B ▸»), col tasto destro si sposta o si toglie. A registrazione ferma «Registra il lato B» registra il B dopo.
+  La musicassetta conta come fatta nel CRM solo quando c'è anche il lato B; se esporti solo il lato A non si conta niente e, quando
+  poi esporti anche il B, i file del lato A vengono sostituiti (niente doppioni). Se passi a un'altra cassetta senza il lato B,
+  chiede se contarla così (aveva un lato solo) o no.
 - I pezzi contano nel totale dei supporti della scheda: finiti tutti, la scheda diventa «pronta». **🔢 Conteggio** corregge fatti/totali.
 - Se la rete salta, gli eventi restano in coda su disco e partono da soli; nessun evento viene contato due volte.

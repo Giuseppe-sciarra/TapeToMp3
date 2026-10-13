@@ -21,7 +21,9 @@ public sealed class WaveformView : Control
     private long _menuFrame;
     private int _menuMarkerIdx = -1;
     private int _menuCutIdx = -1;
-    private ToolStripMenuItem _miCut, _miRestore, _miRemoveMarker, _miSelInOut, _miSplitSel;
+    private ToolStripMenuItem _miCut, _miRestore, _miRemoveMarker, _miSelInOut, _miSplitSel, _miSideB, _miNoSideB;
+    private ToolStripSeparator _sepSides;
+    private long _sideB = -1;
 
     private PeakData _peaks;
     private string _wavPath;
@@ -61,6 +63,10 @@ public sealed class WaveformView : Control
     public int ActiveGap { get; private set; } = -1;
 
     public IReadOnlyList<long> Markers => _markers;
+    /// <summary>Cassette a 2 lati: frame dove comincia il lato B (-1 = nessuno). Lato A e lato B si esportano in file separati.</summary>
+    public long SideBFrame => _sideB;
+    /// <summary>Mostra nel menu «Qui inizia il lato B» (solo con le cassette a 2 lati).</summary>
+    public bool SidesEnabled { get; set; }
     public IReadOnlyList<Gap> Gaps => _gaps;
     public IReadOnlyList<CutRange> Cuts => _cuts;
     public bool CanUndoCut => _undo.Count > 0;
@@ -102,6 +108,12 @@ public sealed class WaveformView : Control
         _menu.Items.Add("Aggiungi divisione brano qui", null, (s, e) => AddMarker(_menuFrame));
         _miRemoveMarker = new ToolStripMenuItem("Rimuovi questa divisione", null, (s, e) => { if (_menuMarkerIdx >= 0) RemoveMarkerAt(_menuMarkerIdx); });
         _menu.Items.Add(_miRemoveMarker);
+        _sepSides = new ToolStripSeparator();
+        _miSideB = new ToolStripMenuItem("Qui inizia il LATO B (file separati)", null, (s, e) => SetSideB(_menuFrame));
+        _miNoSideB = new ToolStripMenuItem("Togli la divisione tra lato A e lato B", null, (s, e) => ClearSideB());
+        _menu.Items.Add(_sepSides);
+        _menu.Items.Add(_miSideB);
+        _menu.Items.Add(_miNoSideB);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add("Adatta alla finestra", null, (s, e) => ZoomToFit());
         _menu.Opening += (s, e) =>
@@ -111,6 +123,8 @@ public sealed class WaveformView : Control
             _miSelInOut.Enabled = HasSelection;
             _miRestore.Visible = _menuCutIdx >= 0;
             _miRemoveMarker.Enabled = _menuMarkerIdx >= 0;
+            _sepSides.Visible = _miSideB.Visible = _miNoSideB.Visible = SidesEnabled;
+            _miNoSideB.Enabled = _sideB > 0;
         };
     }
 
@@ -130,6 +144,7 @@ public sealed class WaveformView : Control
     public void ResetEdits()
     {
         _markers.Clear();
+        _sideB = -1;
         _gaps = new List<Gap>();
         _cuts = new List<CutRange>();
         _undo.Clear();
@@ -197,6 +212,21 @@ public sealed class WaveformView : Control
         _markers.RemoveAt(idx);
         EditsChanged?.Invoke();
         Invalidate();
+    }
+
+    /// <summary>Segna dove comincia il lato B (anche alla fine esatta della registrazione, prima di registrarlo).</summary>
+    public void SetSideB(long frame)
+    {
+        _sideB = frame > 0 && frame <= TotalFrames ? frame : -1;
+        Invalidate();
+        EditsChanged?.Invoke();
+    }
+
+    public void ClearSideB()
+    {
+        _sideB = -1;
+        Invalidate();
+        EditsChanged?.Invoke();
     }
 
     public void ClearMarkers()
@@ -698,23 +728,42 @@ public sealed class WaveformView : Control
         using (var mp = new Pen(Theme.Marker, 1.5f) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash })
         using (var mb = new SolidBrush(Theme.Marker))
         {
-            int trackNo = 1;
+            // con il lato B i brani si numerano per lato: A1, A2… poi B1, B2…
+            bool sides = SidesEnabled && _sideB > InFrame && _sideB < EffectiveOut;
+            int trackNo = 1; bool inB = false;
             for (int i = 0; i < _markers.Count; i++)
             {
                 long m = _markers[i];
-                bool inside = m > InFrame && m < EffectiveOut;
+                if (sides && !inB && m >= _sideB) { inB = true; trackNo = 1; }
+                bool inside = m > InFrame && m < EffectiveOut && !(sides && m == _sideB);
                 if (inside) trackNo++;
                 float x = FrameToX(m);
                 if (x < -20 || x > w + 20) continue;
                 g.DrawLine(mp, x, top, x, top + h);
                 var tri = new[] { new PointF(x - 6, RulerH - 12), new PointF(x + 6, RulerH - 12), new PointF(x, RulerH) };
                 g.FillPolygon(mb, tri);
-                if (inside) g.DrawString(trackNo.ToString(), small, mb, x + 3, top + 2);
+                if (inside) g.DrawString((sides ? (inB ? "B" : "A") : "") + trackNo, small, mb, x + 3, top + 2);
             }
-            if (_markers.Count > 0)
+            if (_markers.Count > 0 || sides)
             {
                 float x1 = FrameToX(InFrame);
-                if (x1 >= -10 && x1 < w) g.DrawString("1", small, mb, Math.Max(0, x1) + 3, top + 2);
+                if (x1 >= -10 && x1 < w) g.DrawString(sides ? "A1" : "1", small, mb, Math.Max(0, x1) + 3, top + 2);
+                if (sides)
+                {
+                    float xb = FrameToX(_sideB);
+                    if (xb >= -10 && xb < w) g.DrawString("B1", small, mb, Math.Max(0, xb) + 3, top + 18);
+                }
+            }
+        }
+
+        // inizio del lato B: lato A e lato B escono in file separati
+        if (SidesEnabled && _sideB > 0)
+        {
+            float xs = FrameToX(_sideB);
+            if (xs >= -60 && xs <= w + 60)
+            {
+                using (var sp = new Pen(Theme.Accent, 3)) g.DrawLine(sp, xs, 0, xs, top + h);
+                DrawFlag(g, xs, top, h, Theme.Accent, "LATO B ▸", true, small);
             }
         }
 

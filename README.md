@@ -8,7 +8,7 @@ Riversaggio musicassette → MP3 / FLAC / WAV / M4A. Niente di più.
 
 1. **Ingresso**: scegli il lettore USB (viene proposto da solo se nel nome c'è "USB"). I VU meter si muovono già: fai partire la cassetta e controlla che la scritta a destra dica *livello OK* (mai *TROPPO ALTO*).
 2. **● REGISTRA** e fai partire il lato A. La forma d'onda scorre in diretta.
-3. Fine lato A: **❚❚ PAUSA**, gira la cassetta, **● RIPRENDI**. Tutto finisce nello stesso file. (La pausa automatica esiste ma è spenta: col fruscio delle cassette non è affidabile.)
+3. Fine lato A: **Passa al lato B** (mette in pausa e segna la divisione), gira la cassetta, **● RIPRENDI**. Con «2 lati» (accanto ai comandi) lato A e lato B escono in **file separati**: «Nome - Lato A» / «Nome - Lato B», oppure A01… e B01… con un file per brano. Con «1 lato» tutto resta in un unico gruppo di file. (La pausa automatica esiste ma è spenta: col fruscio delle cassette non è affidabile.)
 4. **■ STOP**: parte da sola l'**analisi buchi**. Il programma misura il fruscio di *quella* cassetta e segnala, in arancione sul righello e nella lista in basso a sinistra, i punti sospetti: silenzio iniziale/finale, pause fra brani, buchi brevi e (in viola) cali improvvisi dentro la musica. Non taglia niente da solo.
 5. Scorri i punti con **N / P** (o click sulla lista, o sulla fascia arancione). Il punto viene selezionato e zoomato; **▶ Senti** lo fa ascoltare con 3 s prima e dopo. Poi decidi: **✂ Taglia** (puoi prima ritoccare i bordi della selezione), **Dividi qui** (divisione fra brani) oppure **Va bene così**.
 6. Puoi anche selezionare a mano (trascina sulla forma d'onda) e tagliare con **Canc**. I tagli non toccano il file registrato: si annullano con **Ctrl+Z** o tasto destro → *Ripristina questo taglio*.

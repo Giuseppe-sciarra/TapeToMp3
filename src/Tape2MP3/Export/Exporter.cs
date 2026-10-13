@@ -11,6 +11,8 @@ public sealed class ExportSegment
     public long EndFrame;
     public string Title;
     public int TrackNo;
+    /// <summary>Cassette a 2 lati: "A" o "B" (null = senza lati). I due lati escono in file separati, numerati ognuno da 1.</summary>
+    public string Side;
 }
 
 public sealed class ExportFormat
@@ -93,9 +95,15 @@ public static class Exporter
             var parts = CutList.Keep(seg.StartFrame, seg.EndFrame, cuts);
             if (parts.Count == 0) continue;
 
-            string fileName = total == 1
-                ? SafeName(baseName)
-                : $"{seg.TrackNo:00} - {SafeName(string.IsNullOrWhiteSpace(seg.Title) ? $"Traccia {seg.TrackNo:00}" : seg.Title)}";
+            // con i lati: «Nome - Lato A» se il lato è un file unico, altrimenti «A01 - Titolo», «B01 - Titolo»
+            int sideTotal = seg.Side == null ? total : segments.Count(x => x.Side == seg.Side);
+            string fileName = seg.Side != null
+                ? (sideTotal == 1
+                    ? SafeName($"{baseName} - Lato {seg.Side}")
+                    : $"{seg.Side}{seg.TrackNo:00} - {SafeName(string.IsNullOrWhiteSpace(seg.Title) ? $"Traccia {seg.Side}{seg.TrackNo:00}" : seg.Title)}")
+                : total == 1
+                    ? SafeName(baseName)
+                    : $"{seg.TrackNo:00} - {SafeName(string.IsNullOrWhiteSpace(seg.Title) ? $"Traccia {seg.TrackNo:00}" : seg.Title)}";
             string outPath = UniquePath(Path.Combine(folder, fileName + fmt.Ext));
             string partPath = outPath + ".part";
 
@@ -124,12 +132,16 @@ public static class Exporter
                     break;
             }
 
-            string title = total == 1 ? baseName : (string.IsNullOrWhiteSpace(seg.Title) ? $"Traccia {seg.TrackNo:00}" : seg.Title);
+            string title = seg.Side != null
+                ? (sideTotal == 1 ? (string.IsNullOrWhiteSpace(seg.Title) ? $"{baseName} - Lato {seg.Side}" : seg.Title)
+                                  : (string.IsNullOrWhiteSpace(seg.Title) ? $"Traccia {seg.Side}{seg.TrackNo:00}" : seg.Title))
+                : total == 1 ? baseName : (string.IsNullOrWhiteSpace(seg.Title) ? $"Traccia {seg.TrackNo:00}" : seg.Title);
             if (fmt.Key != "wav")
             {
                 args.AddRange(new[] { "-metadata", $"title={title}" });
                 if (!string.IsNullOrWhiteSpace(album)) args.AddRange(new[] { "-metadata", $"album={album}" });
-                if (total > 1) args.AddRange(new[] { "-metadata", $"track={seg.TrackNo}/{total}" });
+                if (sideTotal > 1) args.AddRange(new[] { "-metadata", $"track={seg.TrackNo}/{sideTotal}" });
+                if (seg.Side != null) args.AddRange(new[] { "-metadata", $"disc={(seg.Side == "B" ? 2 : 1)}/2" });   // lato A = disco 1, lato B = disco 2
             }
             args.Add(partPath);
 
