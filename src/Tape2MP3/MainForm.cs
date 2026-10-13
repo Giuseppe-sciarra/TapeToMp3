@@ -58,6 +58,14 @@ public sealed class MainForm : Form
     private CheckBox _chkSplit;
     private TextBox _txtFolder, _txtName;
     private TdButton _btnExport;
+    // lati della cassetta: con 2 lati la cassetta conta come fatta nel CRM solo quando c'è anche il lato B
+    private ComboBox _cbLati;
+    private TdButton _btnLato;
+    private bool _latoB;                 // nella registrazione c'è anche il lato B
+    private bool _soloLatoA;             // esportato solo il lato A di una cassetta a 2 lati: nel CRM non è ancora fatta
+    private string _soloLatoADescr = "";
+    private List<string> _fileLatoA;     // file esportati col solo lato A: si sostituiscono quando si esporta anche il B
+    private string _cartellaLatoA, _wavLatoA;
     private ProgressBar _progress;
     private Label _lblExport;
 
@@ -80,7 +88,8 @@ public sealed class MainForm : Form
         BuildUi();
         // ── CRM: banda in alto con il cliente e le musicassette fatte/totali (stesso giro di VHSCapture) ──
         _crmImp.Attivo = _s.CrmAttivo; _crmImp.Url = _s.CrmUrl ?? ""; _crmImp.Token = _s.CrmToken ?? ""; _crmImp.UltimoCliente = _s.CrmUltimoCliente;
-        _crm = new CrmSessione(_crmImp, imp => { _s.CrmAttivo = imp.Attivo; _s.CrmUrl = imp.Url; _s.CrmToken = imp.Token; _s.CrmUltimoCliente = imp.UltimoCliente; _s.Save(); }, AppInfo.Version);
+        _crmImp.CartellaCliente = _s.CrmCartellaCliente;
+        _crm = new CrmSessione(_crmImp, imp => { _s.CrmAttivo = imp.Attivo; _s.CrmUrl = imp.Url; _s.CrmToken = imp.Token; _s.CrmUltimoCliente = imp.UltimoCliente; _s.CrmCartellaCliente = imp.CartellaCliente; _s.Save(); }, AppInfo.Version);
         _crmBanda = new CrmBanda(_crm, this);
         Controls.Add(_crmBanda);
         Shown += async (_, _) => { await _crm.RiprendiUltimo(); };
@@ -203,11 +212,18 @@ public sealed class MainForm : Form
         _btnPlay.Click += (o, e) => TogglePlay();
         _lblTime = new Label { Tag = "keep", Text = "00:00", AutoSize = false, Width = 150, Height = 40, Font = new Font("Consolas", 20f, FontStyle.Bold), ForeColor = Theme.Text, TextAlign = ContentAlignment.MiddleCenter, Margin = new Padding(12, 2, 6, 0) };
         _lblStatus = new Label { Tag = "keep", Text = "", AutoSize = false, Width = 420, Height = 40, ForeColor = Theme.TextDim, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(6, 2, 6, 0) };
+        _cbLati = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 92, Margin = new Padding(6, 8, 3, 3) };
+        Theme.StyleInput(_cbLati);
+        _cbLati.Items.AddRange(new object[] { "2 lati", "1 lato" });
+        _cbLati.SelectedIndex = 0;
+        _cbLati.SelectedIndexChanged += (o, e) => AggiornaLato();
+        _btnLato = Theme.MakeButton("Lato A", BtnKind.Neutral, 84);
+        _btnLato.Click += (o, e) => { _latoB = !_latoB; AggiornaLato(); };
         _btnOpen = Theme.MakeButton("Apri file…", BtnKind.Neutral, 110);
         _btnNew = Theme.MakeButton("Nuova cassetta", BtnKind.Neutral, 140);
         _btnOpen.Click += (o, e) => DoOpenFile();
         _btnNew.Click += (o, e) => DoNew();
-        r2.Controls.AddRange(new Control[] { _btnRec, _btnPause, _btnStop, Spacer(14), _btnPlay, _lblTime, _lblStatus, _btnOpen, _btnNew });
+        r2.Controls.AddRange(new Control[] { _btnRec, _btnPause, _btnStop, Spacer(14), _btnPlay, _lblTime, _lblStatus, _cbLati, _btnLato, _btnOpen, _btnNew });
         root.Controls.Add(r2, 0, 1);
         r2.Resize += (o, e) =>
         {
@@ -341,6 +357,9 @@ public sealed class MainForm : Form
         StyleLinks();
 
         new ToolTip().SetToolTip(_btnRec, "Registra / riprendi (anche accodare il lato B)");
+        new ToolTip { AutoPopDelay = 15000 }.SetToolTip(_cbLati, "Quanti lati ha la cassetta.\nCon 2 lati nel CRM la cassetta conta come fatta solo quando esporti anche il lato B;\ncon 1 lato conta subito.");
+        new ToolTip { AutoPopDelay = 15000 }.SetToolTip(_btnLato, "Il lato che stai registrando. Passa da solo al lato B quando riprendi dopo la pausa\n(hai girato la cassetta) o quando accodi il lato B. Clic per correggerlo.");
+        AggiornaLato();
         new ToolTip().SetToolTip(_btnPlay, "Ascolta dal cursore, o solo la selezione  [Spazio]");
         new ToolTip().SetToolTip(_btnOpen, "Apri un file audio o una registrazione (puoi anche trascinarlo sulla finestra)");
 
@@ -571,7 +590,9 @@ public sealed class MainForm : Form
             _capture.StartRecording(_writer, _peaks);
             _state = State.Recording;
             _wave.LiveMode = true;
-            SetStatus("Registrazione ripresa.", Tone.Rec);
+            bool girata = DueLati && !_latoB;      // pausa a fine lato A, cassetta girata
+            if (girata) { _latoB = true; AggiornaLato(); }
+            SetStatus(girata ? "Registrazione ripresa: lato B." : "Registrazione ripresa.", Tone.Rec);
             UpdateUi();
             return;
         }
@@ -594,12 +615,15 @@ public sealed class MainForm : Form
                 _state = State.Recording;
                 _exported = false;
                 _wave.LiveMode = true;
+                _latoB = true; AggiornaLato();
                 SetStatus("Registrazione accodata (lato B).", Tone.Rec);
                 UpdateUi();
                 return;
             }
+            if (!await ChiudiCassettaSoloLatoA()) return;
             if (!DiscardCurrent(askIfNotExported: true)) return;
         }
+        else if (!await ChiudiCassettaSoloLatoA()) return;
 
         if (!await _crm.PreparaCliente(this)) return;      // per quale cliente del CRM? (se il collegamento è attivo)
 
@@ -623,6 +647,7 @@ public sealed class MainForm : Form
             _wave.SetData(_peaks, _wavPath);
             _wave.ResetEdits();
             _wave.LiveMode = true;
+            _latoB = false; AggiornaLato();
             ApplyCaptureSettings();
             _capture.StartRecording(_writer, _peaks);
             _state = State.Recording;
@@ -636,6 +661,38 @@ public sealed class MainForm : Form
         }
         RefreshGaps();
         UpdateUi();
+    }
+
+    private bool DueLati => _cbLati == null || _cbLati.SelectedIndex == 0;
+
+    /// <summary>Pulsante del lato: visibile solo con le cassette a 2 lati.</summary>
+    private void AggiornaLato()
+    {
+        if (_btnLato == null) return;
+        _btnLato.Visible = DueLati;
+        _btnLato.Text = _latoB ? "Lato B" : "Lato A";
+        _btnLato.Kind = _latoB ? BtnKind.Primary : BtnKind.Neutral;
+        _btnLato.Invalidate();
+    }
+
+    /// <summary>
+    /// Prima di passare a un'altra cassetta: se quella di prima (2 lati) è stata esportata solo col lato A, chiede
+    /// cosa farne nel CRM. false = l'operatore vuole tornare indietro (per accodare il lato B).
+    /// </summary>
+    private async Task<bool> ChiudiCassettaSoloLatoA()
+    {
+        if (!_soloLatoA) return true;
+        var r = MessageBox.Show(this,
+            "La cassetta di prima è stata esportata solo con il lato A e nel CRM non è ancora segnata fatta.\n\n" +
+            "Sì = segnala fatta così (aveva un lato solo)\n" +
+            "No = non contarla\n" +
+            "Annulla = torna indietro, per registrare il lato B (REGISTRA + → «Accoda (lato B)»)",
+            "Tape2MP3 — lato B mancante", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question, MessageBoxDefaultButton.Button3);
+        if (r == DialogResult.Cancel) return false;
+        _soloLatoA = false; _fileLatoA = null;
+        if (r == DialogResult.Yes) await _crm.ChiediFine(this, 1, _soloLatoADescr, false);
+        else await _crm.Fine("rifai", 1, _soloLatoADescr);
+        return true;
     }
 
     private void ApplyCaptureSettings()
@@ -724,14 +781,16 @@ public sealed class MainForm : Form
         _wave.SetData(null, null);
         _wave.ResetEdits();
         _state = State.Empty;
+        _cbLati.SelectedIndex = 0; _latoB = false; AggiornaLato();     // cassetta nuova: di norma 2 lati (si cambia prima di registrare)
         _lblTime.Text = "00:00";
         RefreshTracks();
         RefreshGaps();
         return true;
     }
 
-    private void DoNew()
+    private async void DoNew()
     {
+        if (!await ChiudiCassettaSoloLatoA()) return;
         if (_state == State.Recording || _state == State.Paused)
         {
             if (MessageBox.Show(this, "Sei in registrazione. Fermare e scartare?", "Tape2MP3", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
@@ -761,6 +820,7 @@ public sealed class MainForm : Form
             InitialDirectory = AppSettings.WorkDir
         };
         if (ofd.ShowDialog(this) != DialogResult.OK) return;
+        if (!await ChiudiCassettaSoloLatoA()) return;
         if (!DiscardCurrentKeepIfSame(ofd.FileName)) return;
         await OpenAudio(ofd.FileName);
     }
@@ -826,6 +886,7 @@ public sealed class MainForm : Form
             _wave.ResetEdits();
             _wave.ZoomToFit();
             _state = State.Stopped;
+            _latoB = true; AggiornaLato();   // file aperto/recuperato: di solito è la cassetta intera (il pulsante del lato lo corregge)
             _txtName.Text = Path.GetFileNameWithoutExtension(file).StartsWith("Registrazione_") ? "Cassetta" : Path.GetFileNameWithoutExtension(file);
             SetStatus($"Aperto: {Path.GetFileName(file)} ({Theme.FormatTime(Sec(peaks.Frames))}).", Tone.Ok);
             RefreshTracks();
@@ -1217,7 +1278,13 @@ public sealed class MainForm : Form
         string quality = _cbQuality.SelectedIndex switch { 0 => "128", 1 => "192", 2 => "256", 4 => "V0", _ => "320" };
         string baseName = string.IsNullOrWhiteSpace(_txtName.Text) ? "Cassetta" : _txtName.Text.Trim();
 
-        string sub = string.Join("\\", (_txtFolder.Text ?? "").Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries).Select(Exporter.SafeName));
+        var subParts = (_txtFolder.Text ?? "").Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries).Select(Exporter.SafeName).ToList();
+        // cliente del CRM: si salva dentro la sua cartella «Nome Cognome», come VHSCapture
+        // (se la sottocartella comincia già col suo nome non lo ripeto)
+        string cliente = _crm.CartellaCliente();
+        if (cliente != null && !(subParts.Count > 0 && subParts[0].Equals(Exporter.SafeName(cliente), StringComparison.OrdinalIgnoreCase)))
+            subParts.Insert(0, Exporter.SafeName(cliente));
+        string sub = string.Join("\\", subParts);
         string folder = string.IsNullOrEmpty(sub) ? dest.Path : Path.Combine(dest.Path, sub);
 
         var segs = BuildSegments();
@@ -1243,12 +1310,30 @@ public sealed class MainForm : Form
                 _progress.Value = (int)Math.Clamp((p.idx + p.frac) / p.total * 1000, 0, 1000);
                 _lblExport.Text = $"Esporto {p.idx + 1} di {p.total} → {folder}";
             });
+            // dopo il lato B si riesporta tutta la cassetta: i file del solo lato A (stessa registrazione,
+            // stessa cartella) vengono sostituiti, così non restano doppioni «(2)»
+            if (_soloLatoA && _latoB && _fileLatoA != null && _wavLatoA == _wavPath
+                && string.Equals(_cartellaLatoA, folder, StringComparison.OrdinalIgnoreCase))
+                foreach (var old in _fileLatoA) { try { if (File.Exists(old)) File.Delete(old); } catch { } }
             var files = await Exporter.ExportAsync(ff, _wavPath, _takeRate, segs, cutsCopy, folder, baseName, fmt, quality, baseName, prog, _cts.Token);
             _exported = true;
             _dirtyAfterExport = false;
-            await _crm.ChiediFine(this, 1, baseName + " → " + folder, false);    // una musicassetta riversata per il CRM
-            _lblExport.Text = $"✔ Esportati {files.Count} file in {folder}";
-            SetStatus($"Esportazione completata: {files.Count} file.", Tone.Ok);
+            string descr = baseName + " → " + folder;
+            if (DueLati && !_latoB && _crm.Corrente != null)
+            {
+                // cassetta a 2 lati ma c'è solo il lato A: nel CRM non si segna fatta (resta «in corso»)
+                _soloLatoA = true; _soloLatoADescr = descr;
+                _fileLatoA = files.ToList(); _cartellaLatoA = folder; _wavLatoA = _wavPath;
+                _lblExport.Text = $"✔ Esportato il lato A: {files.Count} file in {folder}";
+                SetStatus("Lato A esportato: nel CRM la cassetta NON è ancora fatta. Gira la cassetta, REGISTRA + → «Accoda (lato B)» e poi esporta di nuovo.", Tone.Warn);
+            }
+            else
+            {
+                _soloLatoA = false; _fileLatoA = null;
+                await _crm.ChiediFine(this, 1, descr, false);    // una musicassetta riversata per il CRM
+                _lblExport.Text = $"✔ Esportati {files.Count} file in {folder}";
+                SetStatus($"Esportazione completata: {files.Count} file.", Tone.Ok);
+            }
             SystemSounds.Asterisk.Play();
             if (_s.OpenFolderAfterExport)
                 try { Process.Start(new ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true }); } catch { }
@@ -1563,6 +1648,12 @@ public sealed class MainForm : Form
             var r = MessageBox.Show(this, "La registrazione non è stata esportata (o è cambiata dopo l'esportazione).\nChiudere comunque? Resterà recuperabile alla prossima apertura.", "Tape2MP3",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
             if (r != DialogResult.Yes) { e.Cancel = true; return; }
+        }
+        else if (_soloLatoA)
+        {
+            if (MessageBox.Show(this, "Di questa cassetta hai esportato solo il lato A: nel CRM non è ancora segnata fatta.\n\nChiudere lo stesso? La registrazione resta recuperabile alla prossima apertura, per accodare il lato B.",
+                    "Tape2MP3", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+            { e.Cancel = true; return; }
         }
         else if (_wavPath != null && _exported)
         {

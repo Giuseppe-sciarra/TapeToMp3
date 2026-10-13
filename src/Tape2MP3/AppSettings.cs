@@ -73,6 +73,7 @@ public sealed class AppSettings
     public string CrmUrl { get; set; } = "";
     public string CrmToken { get; set; } = "";
     public int CrmUltimoCliente { get; set; }
+    public bool CrmCartellaCliente { get; set; } = true;   // salva dentro la cartella «Nome Cognome» del cliente (come VHSCapture)
 
     public int WinX { get; set; } = -1;
     public int WinY { get; set; } = -1;
