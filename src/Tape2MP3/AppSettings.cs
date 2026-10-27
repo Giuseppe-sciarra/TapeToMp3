@@ -62,6 +62,8 @@ public sealed class AppSettings
     public bool AutoPause { get; set; } = false;
     public double AutoPauseSec { get; set; } = 60;
     public double SilenceDb { get; set; } = -50;
+    /// <summary>Dopo STOP (o INTERROMPI dell'esportazione): secondi in cui il pulsante resta «↶ ANNULLA». 0 = si ferma subito.</summary>
+    public int StopAnnullaSec { get; set; } = 5;
 
     // --- aspetto / aggiornamenti
     public string Theme { get; set; } = "Automatico";   // Automatico | Chiaro | Scuro

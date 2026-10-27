@@ -20,6 +20,8 @@ public sealed class MainForm : Form
     private readonly CaptureEngine _capture = new();
     private readonly PlaybackEngine _player = new();
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 33 };
+    // STOP e interruzione dell'esportazione con ripensamento: per qualche secondo il pulsante diventa «↶ ANNULLA» (UI/StopConAnnulla.cs)
+    private readonly StopConAnnulla _stopRec = new(), _stopExport = new();
 
     private State _state = State.Empty;
     private string _wavPath;
@@ -113,6 +115,13 @@ public sealed class MainForm : Form
         }));
         _player.Finished += () => BeginInvoke(new Action(() => { _player.Stop(); _wave.PlayFrame = -1; UpdateUi(); }));
         _timer.Tick += OnTick;
+        _stopRec.Cambiato += () =>
+        {
+            if (IsDisposed) return;
+            if (_stopRec.InAttesa) SetStatus($"STOP tra {_stopRec.Restano} s: premi «↶ ANNULLA» per continuare.", Tone.Warn);
+            UpdateUi();
+        };
+        _stopExport.Cambiato += () => { if (!IsDisposed) AggiornaPulsanteExport(); };
 
         Theme.Changed += OnThemeChanged;
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnSystemPrefChanged;
@@ -203,7 +212,7 @@ public sealed class MainForm : Form
         var r2 = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, BackColor = Theme.Back, Margin = new Padding(0) };
         _btnRec = Theme.MakeButton("●  REGISTRA", BtnKind.Danger, 140);
         _btnPause = Theme.MakeButton("❚❚  PAUSA", BtnKind.Neutral, 120);
-        _btnStop = Theme.MakeButton("■  STOP", BtnKind.Neutral, 110);
+        _btnStop = Theme.MakeButton("■  STOP", BtnKind.Neutral, 130);   // largo quanto «↶ ANNULLA (5)» del conto alla rovescia
         _btnPlay = Theme.MakeButton("▶  ASCOLTA", BtnKind.Primary, 130);
         _btnRec.Click += (o, e) => DoRecord();
         _btnPause.Click += (o, e) => DoPause();
@@ -356,6 +365,7 @@ public sealed class MainForm : Form
         StyleLinks();
 
         new ToolTip().SetToolTip(_btnRec, "Registra / riprendi (anche accodare il lato B)");
+        new ToolTip().SetToolTip(_btnStop, "Ferma la registrazione: per qualche secondo puoi ancora annullare (Impostazioni)");
         new ToolTip { AutoPopDelay = 15000 }.SetToolTip(_cbLati, "Quanti lati ha la cassetta.\nCon 2 lati nel CRM la cassetta conta come fatta solo quando esporti anche il lato B;\ncon 1 lato conta subito.");
         new ToolTip { AutoPopDelay = 15000 }.SetToolTip(_btnLato, "Fine del lato A: mette in pausa e segna dove comincia il lato B.\nGira la cassetta e premi RIPRENDI: lato A e lato B escono in file separati.\nA registrazione ferma registra il lato B; se il lato B c'è già, clic per togliere la divisione.\n(Col tasto destro sulla forma d'onda: «Qui inizia il LATO B».)");
         AggiornaLato();
@@ -595,6 +605,7 @@ public sealed class MainForm : Form
                 if (q == DialogResult.Cancel) return;
                 if (q == DialogResult.Yes) { _wave.SetSideB(_peaks.Frames); latoB = true; }
             }
+            _stopRec.Annulla();
             ApplyCaptureSettings();
             _capture.StartRecording(_writer, _peaks);
             _state = State.Recording;
@@ -815,9 +826,26 @@ public sealed class MainForm : Form
         FlashWindow();
     }
 
-    private async void DoStop()
+    /// <summary>
+    /// Clic su STOP: non ferma subito. Per qualche secondo il pulsante diventa «↶ ANNULLA» (clic per sbaglio):
+    /// premuto di nuovo la registrazione continua, altrimenti allo zero si ferma davvero.
+    /// </summary>
+    private void DoStop()
     {
         if (_state != State.Recording && _state != State.Paused) return;
+        if (_stopRec.Annulla())
+        {
+            SetStatus(_state == State.Paused ? "Stop annullato: sei in pausa, premi RIPRENDI per continuare." : "Stop annullato: la registrazione continua.",
+                _state == State.Paused ? Tone.Warn : Tone.Rec);
+            return;
+        }
+        _stopRec.Avvia(Math.Clamp(_s.StopAnnullaSec, 0, StopConAnnulla.Massimo), () => { if (_state == State.Recording || _state == State.Paused) DoStopNow(); });
+    }
+
+    private async void DoStopNow()
+    {
+        if (_state != State.Recording && _state != State.Paused) return;
+        _stopRec.Annulla();
         _capture.StopRecording();
         _writer?.Dispose();
         _writer = null;
@@ -862,6 +890,7 @@ public sealed class MainForm : Form
         if (_state == State.Recording || _state == State.Paused)
         {
             if (MessageBox.Show(this, "Sei in registrazione. Fermare e scartare?", "Tape2MP3", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+            _stopRec.Annulla();
             _capture.StopRecording();
             _writer?.Dispose(); _writer = null;
             _exported = true; // già confermato
@@ -1329,7 +1358,13 @@ public sealed class MainForm : Form
 
     private async void DoExport()
     {
-        if (_exporting) { _cts?.Cancel(); return; }
+        if (_exporting)
+        {
+            // INTERROMPI non ferma subito: per qualche secondo il pulsante diventa «↶ ANNULLA» (clic per sbaglio)
+            if (_stopExport.Annulla()) { _lblExport.Text = "Interruzione annullata: l'esportazione continua."; return; }
+            _stopExport.Avvia(Math.Clamp(_s.StopAnnullaSec, 0, StopConAnnulla.Massimo), () => { if (_exporting) _cts?.Cancel(); });
+            return;
+        }
         if (_state != State.Stopped || _wavPath == null) return;
         StopPlayback();
         if (_grid.IsCurrentCellInEditMode) _grid.EndEdit();
@@ -1373,7 +1408,7 @@ public sealed class MainForm : Form
         _state = State.Busy;
         _exporting = true;
         _cts = new CancellationTokenSource();
-        _btnExport.Text = "✖  ANNULLA";
+        AggiornaPulsanteExport();
         UpdateUi();
         try
         {
@@ -1427,10 +1462,19 @@ public sealed class MainForm : Form
             _progress.Value = 0;
             _cts = null;
             _exporting = false;
+            _stopExport.Annulla();
             _state = State.Stopped;
-            _btnExport.Text = "⬇  ESPORTA";
+            AggiornaPulsanteExport();
             UpdateUi();
         }
+    }
+
+    /// <summary>ESPORTA / INTERROMPI (durante l'esportazione) / ↶ ANNULLA (conto alla rovescia dell'interruzione).</summary>
+    private void AggiornaPulsanteExport()
+    {
+        _btnExport.Text = !_exporting ? "⬇  ESPORTA"
+            : _stopExport.InAttesa ? $"↶  ANNULLA ({_stopExport.Restano})"
+            : "✖  INTERROMPI";
     }
 
     // =====================================================================================
@@ -1514,6 +1558,8 @@ public sealed class MainForm : Form
         _btnRec.Text = paused ? "●  RIPRENDI" : stopped ? "●  REGISTRA +" : "●  REGISTRA";
         _btnPause.Enabled = rec;
         _btnStop.Enabled = rec || paused;
+        _btnStop.Text = _stopRec.InAttesa ? $"↶  ANNULLA ({_stopRec.Restano})" : "■  STOP";
+        _btnStop.Kind = _stopRec.InAttesa ? BtnKind.Primary : BtnKind.Neutral;
         _btnPlay.Enabled = stopped;
         _btnPlay.Text = playing ? "■  FERMA" : (_wave.HasSelection && stopped ? "▶  SELEZIONE" : "▶  ASCOLTA");
         _btnOpen.Enabled = !rec && !paused && !busy;
@@ -1712,11 +1758,13 @@ public sealed class MainForm : Form
             if (MessageBox.Show(this, "Sei in registrazione. Fermare e chiudere?\n(La registrazione resta recuperabile alla prossima apertura.)", "Tape2MP3",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             { e.Cancel = true; return; }
+            _stopRec.Annulla();
             _capture.StopRecording();
             _writer?.Dispose(); _writer = null;
         }
         else if (_state == State.Busy && _cts != null)
         {
+            _stopExport.Annulla();
             _cts.Cancel();
         }
         else if (_wavPath != null && (!_exported || _dirtyAfterExport))
@@ -1752,6 +1800,8 @@ public sealed class MainForm : Form
         Theme.Changed -= OnThemeChanged;
         Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnSystemPrefChanged;
         _timer.Stop();
+        _stopRec.Dispose();
+        _stopExport.Dispose();
         _player.Dispose();
         _capture.Dispose();
         base.OnFormClosing(e);

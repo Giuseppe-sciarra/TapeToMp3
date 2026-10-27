@@ -8,7 +8,7 @@ public sealed class SettingsForm : Form
     private readonly AppSettings _s;
     private readonly List<Destination> _dests;
     private readonly ListBox _list;
-    private readonly NumericUpDown _margin, _minGap, _minPause, _minTrack, _autoSec, _autoDb;
+    private readonly NumericUpDown _margin, _minGap, _minPause, _minTrack, _autoSec, _autoDb, _stopSec;
     private readonly CheckBox _drops, _autoPause, _openFolder, _checkUpd;
     private readonly ComboBox _theme;
 
@@ -24,7 +24,7 @@ public sealed class SettingsForm : Form
         StartPosition = FormStartPosition.CenterParent;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = MinimizeBox = false;
-        ClientSize = new Size(660, 716);
+        ClientSize = new Size(660, 746);
         BackColor = Theme.Back;
         ForeColor = Theme.Text;
         Font = new Font("Segoe UI", 9.5f);
@@ -64,7 +64,7 @@ public sealed class SettingsForm : Form
         Controls.Add(gGap);
 
         // --- registrazione / esportazione
-        var gRec = new GroupBox { Text = "Registrazione ed esportazione", ForeColor = Theme.Text, Bounds = new Rectangle(12, 454, 636, 124) };
+        var gRec = new GroupBox { Text = "Registrazione ed esportazione", ForeColor = Theme.Text, Bounds = new Rectangle(12, 454, 636, 154) };
         _autoPause = new CheckBox { Text = "Pausa automatica dopo", Checked = s.AutoPause, AutoSize = true, Location = new Point(14, 28), ForeColor = Theme.Text };
         _autoSec = Num(10, 600, (decimal)s.AutoPauseSec, 0, 5);
         _autoSec.Location = new Point(200, 26);
@@ -79,10 +79,12 @@ public sealed class SettingsForm : Form
         };
         _openFolder = new CheckBox { Text = "Apri la cartella al termine dell'esportazione", Checked = s.OpenFolderAfterExport, AutoSize = true, Location = new Point(14, 86), ForeColor = Theme.Text };
         gRec.Controls.AddRange(new Control[] { _autoPause, _autoSec, l1, _autoDb, l2, l3, _openFolder });
+        _stopSec = Num(0, StopConAnnulla.Massimo, s.StopAnnullaSec, 0, 1);
+        AddRow(gRec, 114, "Secondi per annullare lo STOP:", _stopSec, "0 = si ferma subito (vale anche per INTERROMPI)");
         Controls.Add(gRec);
 
         // --- aspetto
-        var gLook = new GroupBox { Text = "Aspetto e aggiornamenti", ForeColor = Theme.Text, Bounds = new Rectangle(12, 586, 636, 64) };
+        var gLook = new GroupBox { Text = "Aspetto e aggiornamenti", ForeColor = Theme.Text, Bounds = new Rectangle(12, 616, 636, 64) };
         gLook.Controls.Add(new Label { Text = "Tema:", AutoSize = true, Location = new Point(14, 29), ForeColor = Theme.Text });
         _theme = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(70, 25), Width = 140 };
         Theme.StyleInput(_theme);
@@ -190,6 +192,7 @@ public sealed class SettingsForm : Form
         _s.AutoPauseSec = (double)_autoSec.Value;
         _s.SilenceDb = (double)_autoDb.Value;
         _s.OpenFolderAfterExport = _openFolder.Checked;
+        _s.StopAnnullaSec = (int)_stopSec.Value;
         _s.Theme = _theme.SelectedItem as string ?? "Automatico";
         _s.CheckUpdates = _checkUpd.Checked;
         if (_s.LastDestination >= _dests.Count) _s.LastDestination = 0;
